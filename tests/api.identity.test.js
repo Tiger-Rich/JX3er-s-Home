@@ -745,6 +745,17 @@ describe('identity API', () => {
     expect(response.body).toEqual({ error: 'Invalid JSON body' });
     expect(JSON.stringify(response.body)).not.toContain('SyntaxError');
   });
+
+  it('returns a stable public error when JSON exceeds the body limit', async () => {
+    const response = await request(app)
+      .post('/api/auth/register')
+      .send({ account: 'x'.repeat(110 * 1024) });
+
+    expect(response.status).toBe(413);
+    expect(response.body).toEqual({ error: 'Request body is too large' });
+    expect(JSON.stringify(response.body)).not.toContain('entity too large');
+    expect(JSON.stringify(response.body)).not.toContain('stack');
+  });
 });
 
 describe('server startup', () => {

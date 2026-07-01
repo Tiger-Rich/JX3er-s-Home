@@ -17,6 +17,9 @@ export function createApp(db) {
   app.use('/api/profile', createProfileRouter(db));
 
   app.use((error, _req, res, _next) => {
+    if (error?.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'Request body is too large' });
+    }
     if (error?.type === 'entity.parse.failed') {
       return res.status(400).json({ error: 'Invalid JSON body' });
     }
