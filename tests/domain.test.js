@@ -136,22 +136,88 @@ describe('contact visibility', () => {
   };
 
   it('allows the applicant and owner to see contact details after approval', () => {
-    expect(canSeeContact({ id: 11 }, approvedApplication)).toBe(true);
-    expect(canSeeContact({ id: 22 }, approvedApplication)).toBe(true);
+    expect(canSeeContact({ id: 11, status: 'active' }, approvedApplication)).toBe(
+      true,
+    );
+    expect(canSeeContact({ id: 22, status: 'active' }, approvedApplication)).toBe(
+      true,
+    );
   });
 
   it.each(['pending', 'rejected'])(
     'hides contact details while an application is %s',
     (status) => {
       const application = { ...approvedApplication, status };
-      expect(canSeeContact({ id: 11 }, application)).toBe(false);
-      expect(canSeeContact({ id: 22 }, application)).toBe(false);
+      expect(canSeeContact({ id: 11, status: 'active' }, application)).toBe(
+        false,
+      );
+      expect(canSeeContact({ id: 22, status: 'active' }, application)).toBe(
+        false,
+      );
     },
   );
 
   it('hides contact details from unauthenticated and unrelated users', () => {
     expect(canSeeContact(null, approvedApplication)).toBe(false);
-    expect(canSeeContact({ id: 33 }, approvedApplication)).toBe(false);
-    expect(canSeeContact({ id: 11 }, null)).toBe(false);
+    expect(canSeeContact({ id: 33, status: 'active' }, approvedApplication)).toBe(
+      false,
+    );
+    expect(canSeeContact({ id: 11, status: 'active' }, null)).toBe(false);
+  });
+
+  it.each([
+    ['a missing user ID', { status: 'active' }, approvedApplication],
+    [
+      'a null user and applicant ID',
+      { id: null, status: 'active' },
+      { ...approvedApplication, applicantId: null },
+    ],
+    [
+      'a missing applicant ID',
+      { id: 22, status: 'active' },
+      { status: 'approved', ownerId: 22 },
+    ],
+    [
+      'a null applicant ID',
+      { id: 22, status: 'active' },
+      { ...approvedApplication, applicantId: null },
+    ],
+    [
+      'a missing owner ID',
+      { id: 11, status: 'active' },
+      { status: 'approved', applicantId: 11 },
+    ],
+    [
+      'a null owner ID',
+      { id: 11, status: 'active' },
+      { ...approvedApplication, ownerId: null },
+    ],
+    [
+      'a disabled applicant',
+      { id: 11, status: 'disabled' },
+      approvedApplication,
+    ],
+    [
+      'mixed numeric and string IDs',
+      { id: 22, status: 'active' },
+      { ...approvedApplication, applicantId: '11' },
+    ],
+    [
+      'a zero user and applicant ID',
+      { id: 0, status: 'active' },
+      { ...approvedApplication, applicantId: 0 },
+    ],
+    [
+      'a negative user and applicant ID',
+      { id: -1, status: 'active' },
+      { ...approvedApplication, applicantId: -1 },
+    ],
+    [
+      'a fractional user and applicant ID',
+      { id: 1.5, status: 'active' },
+      { ...approvedApplication, applicantId: 1.5 },
+    ],
+  ])('hides contact details for %s', (_label, user, application) => {
+    expect(canSeeContact(user, application)).toBe(false);
   });
 });

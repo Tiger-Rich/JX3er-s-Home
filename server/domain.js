@@ -42,10 +42,18 @@ export function canApplyContact(user) {
   return isActiveVerifiedUser(user);
 }
 
+function isValidId(id) {
+  return Number.isInteger(id) && id > 0;
+}
+
 export function canSeeContact(user, application) {
   return Boolean(
     user &&
+      user.status === 'active' &&
       application?.status === 'approved' &&
+      isValidId(user.id) &&
+      isValidId(application.applicantId) &&
+      isValidId(application.ownerId) &&
       (user.id === application.applicantId || user.id === application.ownerId),
   );
 }
