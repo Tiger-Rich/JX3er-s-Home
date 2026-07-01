@@ -9,15 +9,22 @@ const schema = readFileSync(join(moduleDirectory, 'schema.sql'), 'utf8');
 
 export function createDatabase(filename) {
   const db = new Database(filename);
-  db.pragma('foreign_keys = ON');
-  db.exec(schema);
-  return db;
+  try {
+    db.pragma('foreign_keys = ON');
+    db.exec(schema);
+    return db;
+  } catch (error) {
+    if (db.open) {
+      db.close();
+    }
+    throw error;
+  }
 }
 
 export function seedDatabase(db) {
   const seed = db.transaction(() => {
     const insertUser = db.prepare(`
-      INSERT OR IGNORE INTO users (
+      INSERT INTO users (
         account,
         passwordHash,
         nickname,
@@ -36,6 +43,7 @@ export function seedDatabase(db) {
         @role,
         'active'
       )
+      ON CONFLICT(account) DO NOTHING
     `);
 
     insertUser.run({
@@ -66,10 +74,24 @@ export function seedDatabase(db) {
       role: 'user',
     });
 
-    const findUser = db.prepare('SELECT id FROM users WHERE account = ?');
-    const adminId = findUser.get('admin').id;
-    const qixiuId = findUser.get('qixiu').id;
-    const wanhuaId = findUser.get('wanhua').id;
+    const findUser = db.prepare(
+      'SELECT id, role FROM users WHERE account = ?',
+    );
+    const requireSeedUser = (account, expectedRole) => {
+      const user = findUser.get(account);
+      if (!user) {
+        throw new Error(`Seed account "${account}" was not created`);
+      }
+      if (user.role !== expectedRole) {
+        throw new Error(
+          `Seed account "${account}" must have role "${expectedRole}", found "${user.role}"`,
+        );
+      }
+      return user.id;
+    };
+    const adminId = requireSeedUser('admin', 'admin');
+    const qixiuId = requireSeedUser('qixiu', 'user');
+    const wanhuaId = requireSeedUser('wanhua', 'user');
 
     const insertProfile = db.prepare(`
       INSERT OR IGNORE INTO profiles (

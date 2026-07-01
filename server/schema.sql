@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS requests (
   remote INTEGER NOT NULL DEFAULT 0 CHECK (remote IN (0, 1)),
   industry TEXT,
   budgetOrReward TEXT,
-  expiresAt TEXT,
+  expiresAt TEXT NOT NULL CHECK (datetime(expiresAt) IS NOT NULL),
   status TEXT NOT NULL DEFAULT 'draft'
     CHECK (status IN (
       'draft',
@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS requests (
   takedownReason TEXT,
   createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (id, ownerId),
   FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -95,7 +96,9 @@ CREATE TABLE IF NOT EXISTS contact_applications (
   createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (requestId, applicantId),
-  FOREIGN KEY (requestId) REFERENCES requests(id) ON DELETE CASCADE,
+  CHECK (applicantId <> ownerId),
+  FOREIGN KEY (requestId, ownerId)
+    REFERENCES requests(id, ownerId) ON DELETE CASCADE,
   FOREIGN KEY (applicantId) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
 );

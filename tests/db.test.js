@@ -48,20 +48,24 @@ describe('SQLite database', () => {
       "INSERT INTO users (account, passwordHash, nickname, status) VALUES ('bad-status', 'password:test', 'Bad Status', 'pending')",
     ],
     [
+      'contact visibility flags',
+      "INSERT INTO users (account, passwordHash, nickname, contactVisibleAfterApproval) VALUES ('bad-visibility', 'password:test', 'Bad Visibility', 2)",
+    ],
+    [
       'verification statuses',
       "INSERT INTO verifications (userId, status) VALUES (1, 'unknown')",
     ],
     [
       'request types',
-      "INSERT INTO requests (ownerId, type, title, description) VALUES (1, 'boosting', 'Bad type', 'Rejected by CHECK')",
+      "INSERT INTO requests (ownerId, type, title, description, expiresAt) VALUES (1, 'boosting', 'Bad type', 'Rejected by CHECK', '2027-01-01 00:00:00')",
     ],
     [
       'request statuses',
-      "INSERT INTO requests (ownerId, type, title, description, status) VALUES (1, 'trade', 'Bad status', 'Rejected by CHECK', 'published')",
+      "INSERT INTO requests (ownerId, type, title, description, expiresAt, status) VALUES (1, 'trade', 'Bad status', 'Rejected by CHECK', '2027-01-01 00:00:00', 'published')",
     ],
     [
       'request remote flags',
-      "INSERT INTO requests (ownerId, type, title, description, remote) VALUES (1, 'trade', 'Bad remote', 'Rejected by CHECK', 2)",
+      "INSERT INTO requests (ownerId, type, title, description, remote, expiresAt) VALUES (1, 'trade', 'Bad remote', 'Rejected by CHECK', 2, '2027-01-01 00:00:00')",
     ],
     [
       'contact application statuses',
@@ -79,6 +83,76 @@ describe('SQLite database', () => {
     seedDatabase(db);
 
     expect(() => db.exec(sql)).toThrow(/CHECK constraint failed/);
+  });
+
+  it.each([
+    ['a missing expiration', null, /NOT NULL constraint failed/],
+    ['an invalid expiration', 'not-a-date', /CHECK constraint failed/],
+  ])('rejects requests with %s', (_label, expiresAt, expectedError) => {
+    seedDatabase(db);
+    const ownerId = db
+      .prepare("SELECT id FROM users WHERE account = 'qixiu'")
+      .get().id;
+    const insertRequest = db.prepare(`
+      INSERT INTO requests (ownerId, type, title, description, expiresAt)
+      VALUES (?, 'trade', 'Invalid expiration', 'Must be rejected', ?)
+    `);
+
+    expect(() => insertRequest.run(ownerId, expiresAt)).toThrow(expectedError);
+  });
+
+  it('rejects a contact application whose owner does not own the request', () => {
+    seedDatabase(db);
+    const users = Object.fromEntries(
+      db
+        .prepare("SELECT account, id FROM users")
+        .all()
+        .map(({ account, id }) => [account, id]),
+    );
+    const requestId = db.prepare('SELECT id FROM requests LIMIT 1').get().id;
+
+    expect(() =>
+      db
+        .prepare(
+          'INSERT INTO contact_applications (requestId, applicantId, ownerId) VALUES (?, ?, ?)',
+        )
+        .run(requestId, users.wanhua, users.admin),
+    ).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
+  it('rejects owners applying to their own requests', () => {
+    seedDatabase(db);
+    const request = db
+      .prepare('SELECT id, ownerId FROM requests LIMIT 1')
+      .get();
+
+    expect(() =>
+      db
+        .prepare(
+          'INSERT INTO contact_applications (requestId, applicantId, ownerId) VALUES (?, ?, ?)',
+        )
+        .run(request.id, request.ownerId, request.ownerId),
+    ).toThrow(/CHECK constraint failed/);
+  });
+
+  it('rolls back seeding when an existing seed account has the wrong role', () => {
+    db.prepare(`
+      INSERT INTO users (account, passwordHash, nickname, role)
+      VALUES ('qixiu', 'password:existing', 'Existing account', 'admin')
+    `).run();
+
+    expect(() => seedDatabase(db)).toThrow(
+      /Seed account "qixiu" must have role "user", found "admin"/,
+    );
+    expect(db.prepare('SELECT account, role FROM users').all()).toEqual([
+      { account: 'qixiu', role: 'admin' },
+    ]);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM profiles').get().count).toBe(
+      0,
+    );
+    expect(db.prepare('SELECT COUNT(*) AS count FROM requests').get().count).toBe(
+      0,
+    );
   });
 
   it('seeds prototype accounts, complete profiles, approvals, and a request', () => {
