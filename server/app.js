@@ -17,9 +17,13 @@ export function createApp(db) {
   app.use('/api/profile', createProfileRouter(db));
 
   app.use((error, _req, res, _next) => {
-    const status = Number.isInteger(error.status) ? error.status : 500;
-    const message = status < 500 ? error.message : 'Internal server error';
-    res.status(status).json({ error: message });
+    if (error?.type === 'entity.parse.failed') {
+      return res.status(400).json({ error: 'Invalid JSON body' });
+    }
+    if (error?.exposeToClient === true && Number.isInteger(error.status)) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    return res.status(500).json({ error: 'Internal server error' });
   });
 
   return app;

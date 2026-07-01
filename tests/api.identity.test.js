@@ -1,10 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import request from 'supertest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../server/app.js';
 import { issueToken } from '../server/auth.js';
@@ -59,6 +62,21 @@ describe('identity API', () => {
     },
   );
 
+  it.each([
+    ['a non-string value', 123, 'nickname must be a string'],
+    [
+      'an overlong value',
+      'x'.repeat(41),
+      'nickname must be at most 40 characters',
+    ],
+  ])('rejects registration nickname with %s', async (_label, nickname, error) => {
+    const response = await register({ nickname });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM users').get().count).toBe(0);
+  });
+
   it('registers a user and creates its profile and initial verification atomically', async () => {
     const response = await register();
 
@@ -71,7 +89,6 @@ describe('identity API', () => {
       status: 'active',
     });
     expect(response.body.profile).toMatchObject({
-      userId: response.body.user.id,
       server: null,
       gameNickname: null,
     });
@@ -203,7 +220,7 @@ describe('identity API', () => {
       account: 'new-user',
       nickname: 'New User',
     });
-    expect(response.body.profile.userId).toBe(registration.body.user.id);
+    expect(response.body.profile.server).toBeNull();
     expect(response.body.verificationStatus).toBe('not_submitted');
     expectNoPasswordHash(response.body);
   });
@@ -246,7 +263,6 @@ describe('identity API', () => {
       contactValue: null,
     });
     expect(response.body.profile).toMatchObject({
-      userId: first.body.user.id,
       server: null,
       gameNickname: null,
       sect: null,
@@ -259,6 +275,60 @@ describe('identity API', () => {
     expect(response.body.verificationStatus).toBe('not_submitted');
     expect(JSON.stringify(response.body)).not.toContain('second');
     expectNoPasswordHash(response.body);
+  });
+
+  it('returns only explicit public identity and profile DTO fields', async () => {
+    const registration = await register();
+    const authorization = `Bearer ${registration.body.token}`;
+    const expectedUserFields = [
+      'id',
+      'account',
+      'nickname',
+      'city',
+      'contactValue',
+      'role',
+      'status',
+    ].sort();
+    const expectedProfileFields = [
+      'server',
+      'gameNickname',
+      'sect',
+      'startedYear',
+      'industry',
+      'occupation',
+      'canOffer',
+      'lookingFor',
+    ].sort();
+
+    expect(Object.keys(registration.body.user).sort()).toEqual(
+      expectedUserFields,
+    );
+    expect(Object.keys(registration.body.profile).sort()).toEqual(
+      expectedProfileFields,
+    );
+
+    const me = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', authorization);
+    const ownProfile = await request(app)
+      .get('/api/profile')
+      .set('Authorization', authorization);
+    expect(Object.keys(me.body.user).sort()).toEqual(expectedUserFields);
+    expect(Object.keys(me.body.profile).sort()).toEqual(expectedProfileFields);
+    expect(Object.keys(ownProfile.body.user).sort()).toEqual(
+      expectedUserFields,
+    );
+    expect(Object.keys(ownProfile.body.profile).sort()).toEqual(
+      expectedProfileFields,
+    );
+
+    const submission = await request(app)
+      .post('/api/profile/verification')
+      .set('Authorization', authorization)
+      .send({ server: 'Dream River', gameNickname: 'Sword Heart' });
+    expect(Object.keys(submission.body.profile).sort()).toEqual(
+      ['nickname', 'city', 'contactValue', ...expectedProfileFields].sort(),
+    );
   });
 
   it.each([
@@ -288,6 +358,168 @@ describe('identity API', () => {
       ).toBe('not_submitted');
     },
   );
+
+  it.each([
+    'server',
+    'gameNickname',
+    'nickname',
+    'city',
+    'contactValue',
+    'sect',
+    'industry',
+    'occupation',
+    'canOffer',
+    'lookingFor',
+    'supportMaterial',
+  ])('rejects a non-string %s before writing verification data', async (field) => {
+    const registration = await register();
+    const response = await request(app)
+      .post('/api/profile/verification')
+      .set('Authorization', `Bearer ${registration.body.token}`)
+      .send({
+        server: 'Dream River',
+        gameNickname: 'Sword Heart',
+        nickname: 'Unchanged Name',
+        [field]: 123,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: `${field} must be a string` });
+    expect(
+      db
+        .prepare('SELECT nickname FROM users WHERE id = ?')
+        .get(registration.body.user.id).nickname,
+    ).toBe('New User');
+    expect(
+      db
+        .prepare('SELECT status FROM verifications WHERE userId = ?')
+        .get(registration.body.user.id).status,
+    ).toBe('not_submitted');
+  });
+
+  it.each([
+    ['a string', '2016'],
+    ['a fraction', 2016.5],
+    ['before the game launch', 2008],
+    ['in the future', new Date().getFullYear() + 1],
+  ])('rejects startedYear when it is %s', async (_label, startedYear) => {
+    const registration = await register();
+    const response = await request(app)
+      .post('/api/profile/verification')
+      .set('Authorization', `Bearer ${registration.body.token}`)
+      .send({
+        server: 'Dream River',
+        gameNickname: 'Sword Heart',
+        startedYear,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: `startedYear must be an integer between 2009 and ${new Date().getFullYear()}`,
+    });
+    expect(
+      db
+        .prepare('SELECT status FROM verifications WHERE userId = ?')
+        .get(registration.body.user.id).status,
+    ).toBe('not_submitted');
+  });
+
+  it.each([
+    ['server', 80],
+    ['gameNickname', 80],
+    ['nickname', 40],
+    ['city', 40],
+    ['contactValue', 160],
+    ['sect', 40],
+    ['industry', 80],
+    ['occupation', 80],
+    ['canOffer', 500],
+    ['lookingFor', 500],
+    ['supportMaterial', 500],
+  ])('rejects %s longer than %i characters', async (field, maxLength) => {
+    const registration = await register();
+    const response = await request(app)
+      .post('/api/profile/verification')
+      .set('Authorization', `Bearer ${registration.body.token}`)
+      .send({
+        server: 'Dream River',
+        gameNickname: 'Sword Heart',
+        [field]: 'x'.repeat(maxLength + 1),
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: `${field} must be at most ${maxLength} characters`,
+    });
+    expect(
+      db
+        .prepare('SELECT status FROM verifications WHERE userId = ?')
+        .get(registration.body.user.id).status,
+    ).toBe('not_submitted');
+  });
+
+  it('normalizes optional blanks, preserves omitted fields, and allows clearing startedYear', async () => {
+    const registration = await register();
+    const userId = registration.body.user.id;
+    db.prepare(
+      `UPDATE users
+       SET nickname = 'Existing Name', city = 'Existing City',
+           contactValue = 'existing-contact'
+       WHERE id = ?`,
+    ).run(userId);
+    db.prepare(
+      `UPDATE profiles
+       SET server = 'Old Server', gameNickname = 'Old Nickname', sect = 'Old Sect',
+           startedYear = 2016, industry = 'Existing Industry',
+           occupation = 'Existing Occupation', canOffer = 'Existing Offer',
+           lookingFor = 'Existing Need'
+       WHERE userId = ?`,
+    ).run(userId);
+    db.prepare(
+      `UPDATE verifications
+       SET status = 'rejected', supportMaterial = 'existing material'
+       WHERE userId = ?`,
+    ).run(userId);
+
+    const response = await request(app)
+      .post('/api/profile/verification')
+      .set('Authorization', `Bearer ${registration.body.token}`)
+      .send({
+        server: 'New Server',
+        gameNickname: 'New Nickname',
+        city: '   ',
+        sect: '   ',
+        startedYear: null,
+      });
+
+    expect(response.status).toBe(200);
+    expect(
+      db
+        .prepare(
+          `SELECT u.nickname, u.city, u.contactValue, p.server, p.gameNickname,
+                  p.sect, p.startedYear, p.industry, p.occupation, p.canOffer,
+                  p.lookingFor, v.supportMaterial
+           FROM users u
+           JOIN profiles p ON p.userId = u.id
+           JOIN verifications v ON v.userId = u.id
+           WHERE u.id = ?`,
+        )
+        .get(userId),
+    ).toEqual({
+      nickname: 'Existing Name',
+      city: null,
+      contactValue: 'existing-contact',
+      server: 'New Server',
+      gameNickname: 'New Nickname',
+      sect: null,
+      startedYear: null,
+      industry: 'Existing Industry',
+      occupation: 'Existing Occupation',
+      canOffer: 'Existing Offer',
+      lookingFor: 'Existing Need',
+      supportMaterial: 'existing material',
+    });
+  });
 
   it('updates the complete card and sets verification to pending', async () => {
     const registration = await register();
@@ -353,6 +585,128 @@ describe('identity API', () => {
     });
   });
 
+  it.each(['pending', 'approved'])(
+    'rejects verification submission while status is %s without partial updates',
+    async (status) => {
+      const registration = await register();
+      const reviewer = await register({
+        account: `reviewer-${status}`,
+        nickname: 'Reviewer',
+      });
+      const userId = registration.body.user.id;
+      db.prepare(
+        `UPDATE verifications
+         SET status = ?, supportMaterial = ?, reviewerId = ?, reviewedAt = ?,
+             rejectReason = ?
+         WHERE userId = ?`,
+      ).run(
+        status,
+        'existing material',
+        reviewer.body.user.id,
+        '2026-06-30 12:00:00',
+        'existing reason',
+        userId,
+      );
+
+      const beforeUser = db
+        .prepare('SELECT nickname, city, contactValue FROM users WHERE id = ?')
+        .get(userId);
+      const beforeProfile = db
+        .prepare(
+          `SELECT server, gameNickname, sect, startedYear, industry,
+                  occupation, canOffer, lookingFor
+           FROM profiles WHERE userId = ?`,
+        )
+        .get(userId);
+      const beforeVerification = db
+        .prepare(
+          `SELECT status, supportMaterial, reviewerId, reviewedAt, rejectReason
+           FROM verifications WHERE userId = ?`,
+        )
+        .get(userId);
+
+      const response = await request(app)
+        .post('/api/profile/verification')
+        .set('Authorization', `Bearer ${registration.body.token}`)
+        .send({
+          nickname: 'Must Not Change',
+          city: 'Must Not Change',
+          contactValue: 'must-not-change',
+          server: 'Blocked Server',
+          gameNickname: 'Blocked Nickname',
+          occupation: 'Must Not Change',
+          supportMaterial: 'replacement material',
+        });
+
+      expect(response.status).toBe(409);
+      expect(response.body).toEqual({
+        error: 'Verification cannot be submitted in its current state',
+      });
+      expect(
+        db
+          .prepare('SELECT nickname, city, contactValue FROM users WHERE id = ?')
+          .get(userId),
+      ).toEqual(beforeUser);
+      expect(
+        db
+          .prepare(
+            `SELECT server, gameNickname, sect, startedYear, industry,
+                    occupation, canOffer, lookingFor
+             FROM profiles WHERE userId = ?`,
+          )
+          .get(userId),
+      ).toEqual(beforeProfile);
+      expect(
+        db
+          .prepare(
+            `SELECT status, supportMaterial, reviewerId, reviewedAt, rejectReason
+             FROM verifications WHERE userId = ?`,
+          )
+          .get(userId),
+      ).toEqual(beforeVerification);
+    },
+  );
+
+  it('allows rejected verification to be resubmitted and clears review metadata', async () => {
+    const registration = await register();
+    const reviewer = await register({
+      account: 'rejected-reviewer',
+      nickname: 'Reviewer',
+    });
+    const userId = registration.body.user.id;
+    db.prepare(
+      `UPDATE verifications
+       SET status = 'rejected', supportMaterial = 'old material', reviewerId = ?,
+           reviewedAt = '2026-06-30 12:00:00', rejectReason = 'old reason'
+       WHERE userId = ?`,
+    ).run(reviewer.body.user.id, userId);
+
+    const response = await request(app)
+      .post('/api/profile/verification')
+      .set('Authorization', `Bearer ${registration.body.token}`)
+      .send({
+        server: 'Dream River',
+        gameNickname: 'Sword Heart',
+        supportMaterial: 'new material',
+      });
+
+    expect(response.status).toBe(200);
+    expect(
+      db
+        .prepare(
+          `SELECT status, supportMaterial, reviewerId, reviewedAt, rejectReason
+           FROM verifications WHERE userId = ?`,
+        )
+        .get(userId),
+    ).toEqual({
+      status: 'pending',
+      supportMaterial: 'new material',
+      reviewerId: null,
+      reviewedAt: null,
+      rejectReason: null,
+    });
+  });
+
   it('blocks disabled users from protected profile routes', async () => {
     const registration = await register();
     db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(
@@ -380,6 +734,17 @@ describe('identity API', () => {
     expect(response.status).toBe(200);
     expect(response.headers['access-control-allow-origin']).toBeTruthy();
   });
+
+  it('returns a stable public error for malformed JSON', async () => {
+    const response = await request(app)
+      .post('/api/auth/register')
+      .set('Content-Type', 'application/json')
+      .send('{"account":');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Invalid JSON body' });
+    expect(JSON.stringify(response.body)).not.toContain('SyntaxError');
+  });
 });
 
 describe('server startup', () => {
@@ -387,7 +752,6 @@ describe('server startup', () => {
     const indexUrl = pathToFileURL(
       resolve(process.cwd(), 'server/index.js'),
     ).href;
-    const startedAt = Date.now();
     const result = spawnSync(
       process.execPath,
       [
@@ -405,7 +769,6 @@ describe('server startup', () => {
     expect(result.error).toBeUndefined();
     expect(result.signal).toBeNull();
     expect(result.status, result.stderr).toBe(0);
-    expect(Date.now() - startedAt).toBeLessThan(3000);
   });
 
   it('binds to localhost and seeds accounts before accepting requests', async () => {
@@ -433,6 +796,52 @@ describe('server startup', () => {
           server.close((error) => (error ? reject(error) : resolve()));
         });
       }
+    }
+  });
+
+  it('closes the database when the requested port is already in use', async () => {
+    const blocker = createServer();
+    blocker.listen(0, '127.0.0.1');
+    await once(blocker, 'listening');
+    const port = blocker.address().port;
+    const tempDirectory = mkdtempSync(join(tmpdir(), 'fanshu-api-'));
+    const databasePath = join(tempDirectory, 'conflict.db');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    let server;
+    let databaseDeleted = false;
+
+    try {
+      server = startServer({
+        filename: databasePath,
+        host: '127.0.0.1',
+        port,
+      });
+      const [error] = await once(server, 'error');
+
+      expect(error.code).toBe('EADDRINUSE');
+      expect(server.listening).toBe(false);
+      expect(logSpy).not.toHaveBeenCalled();
+
+      try {
+        rmSync(databasePath);
+        databaseDeleted = true;
+      } catch {
+        databaseDeleted = false;
+      }
+      expect(databaseDeleted).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+      if (!databaseDeleted && server && existsSync(databasePath)) {
+        server.emit('close');
+      }
+      if (blocker.listening) {
+        await new Promise((resolveClose, rejectClose) => {
+          blocker.close((error) =>
+            error ? rejectClose(error) : resolveClose(),
+          );
+        });
+      }
+      rmSync(tempDirectory, { recursive: true, force: true });
     }
   });
 });

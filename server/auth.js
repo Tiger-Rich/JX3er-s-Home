@@ -36,8 +36,7 @@ export function loadCurrentUser(db, userId) {
     db
       .prepare(
         `SELECT u.id, u.account, u.nickname, u.city, u.contactValue,
-                u.contactVisibleAfterApproval, u.role, u.status, u.openid,
-                u.createdAt, u.updatedAt,
+                u.role, u.status,
                 COALESCE(v.status, 'not_submitted') AS verificationStatus
          FROM users u
          LEFT JOIN verifications v ON v.userId = u.id

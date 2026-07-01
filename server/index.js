@@ -12,12 +12,18 @@ export function startServer({
   const db = createDatabase(filename);
   try {
     seedDatabase(db);
-    const server = createApp(db).listen(port, host, () => {
+    let databaseClosed = false;
+    const closeDatabase = () => {
+      if (databaseClosed) return;
+      databaseClosed = true;
+      if (db.open) db.close();
+    };
+    const server = createApp(db).listen(port, host, (error) => {
+      if (error) return;
       console.log(`Fanshu API listening on http://${host}:${port}`);
     });
-    server.on('close', () => {
-      if (db.open) db.close();
-    });
+    server.once('error', closeDatabase);
+    server.once('close', closeDatabase);
     return server;
   } catch (error) {
     if (db.open) db.close();

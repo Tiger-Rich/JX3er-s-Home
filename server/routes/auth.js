@@ -8,17 +8,40 @@ import {
   verifyPassword,
 } from '../auth.js';
 
-function requiredText(value, field) {
-  if (typeof value !== 'string' || !value.trim()) {
-    const error = new Error(`${field} is required`);
-    error.status = 400;
-    throw error;
+function clientError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.exposeToClient = true;
+  return error;
+}
+
+function requiredText(value, field, maxLength) {
+  if (value === undefined || value === null) {
+    throw clientError(400, `${field} is required`);
   }
-  return value.trim();
+  if (typeof value !== 'string') {
+    throw clientError(400, `${field} must be a string`);
+  }
+
+  const normalized = value.trim();
+  if (!normalized) throw clientError(400, `${field} is required`);
+  if (maxLength && normalized.length > maxLength) {
+    throw clientError(
+      400,
+      `${field} must be at most ${maxLength} characters`,
+    );
+  }
+  return normalized;
 }
 
 function loadProfile(db, userId) {
-  return db.prepare('SELECT * FROM profiles WHERE userId = ?').get(userId);
+  return db
+    .prepare(
+      `SELECT server, gameNickname, sect, startedYear, industry, occupation,
+              canOffer, lookingFor
+       FROM profiles WHERE userId = ?`,
+    )
+    .get(userId);
 }
 
 function identityResponse(user, profile) {
@@ -33,7 +56,7 @@ export function createAuthRouter(db) {
     try {
       const account = requiredText(req.body?.account, 'account');
       requiredText(req.body?.password, 'password');
-      const nickname = requiredText(req.body?.nickname, 'nickname');
+      const nickname = requiredText(req.body?.nickname, 'nickname', 40);
 
       const createIdentity = db.transaction(() => {
         const result = db
