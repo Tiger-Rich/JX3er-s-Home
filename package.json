@@ -10,7 +10,7 @@
     "dev": "vite",
     "api": "node --watch server/index.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run api\"",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
     "build": "vite build",
