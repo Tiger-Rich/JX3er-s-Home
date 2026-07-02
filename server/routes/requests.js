@@ -18,6 +18,8 @@ const REQUEST_COLUMNS = `
   p.industry AS ownerIndustry, p.occupation AS ownerOccupation,
   COALESCE(v.status, 'not_submitted') AS ownerVerificationStatus
 `;
+const UTC_ISO_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
 function clientError(status, message) {
   const error = new Error(message);
@@ -54,6 +56,29 @@ function optionalText(value, field, maxLength) {
     throw clientError(400, `${field} must be at most ${maxLength} characters`);
   }
   return normalized || null;
+}
+
+function futureUtcIso(value) {
+  const input = requiredText(value, 'expiresAt', 64);
+  if (input !== value || !UTC_ISO_PATTERN.test(input)) {
+    throw clientError(400, 'expiresAt must be a valid future UTC ISO date');
+  }
+
+  const expiry = new Date(input);
+  const normalized = Number.isNaN(expiry.getTime())
+    ? null
+    : expiry.toISOString();
+  const canonicalInput = input.includes('.')
+    ? input
+    : input.replace('Z', '.000Z');
+  if (
+    !normalized ||
+    normalized !== canonicalInput ||
+    expiry.getTime() <= Date.now()
+  ) {
+    throw clientError(400, 'expiresAt must be a valid future UTC ISO date');
+  }
+  return normalized;
 }
 
 function requestDto(row, includeOwner = true) {
@@ -188,11 +213,7 @@ export function createRequestsRouter(db) {
         if (!city && !remote) {
           throw clientError(400, 'city or remote=true is required');
         }
-        const expiresAt = requiredText(body.expiresAt, 'expiresAt', 64);
-        const expiry = Date.parse(expiresAt);
-        if (!Number.isFinite(expiry) || expiry <= Date.now()) {
-          throw clientError(400, 'expiresAt must be a future date');
-        }
+        const expiresAt = futureUtcIso(body.expiresAt);
 
         const values = {
           ownerId: req.user.id,

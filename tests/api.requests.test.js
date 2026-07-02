@@ -423,6 +423,45 @@ describe('request, contact, and admin API', () => {
     expect(invalidId.status).toBe(400);
   });
 
+  it.each([
+    ['slash date', '12/31/2099'],
+    ['local date-time', '2099-12-31T23:59:59'],
+    ['offset date-time', '2099-12-31T23:59:59+08:00'],
+    ['whitespace-wrapped UTC date-time', ' 2099-12-31T23:59:59Z '],
+    ['invalid calendar date', '2099-02-30T00:00:00Z'],
+  ])(
+    'rejects %s expiry with a stable error and no insert',
+    async (_label, expiresAt) => {
+      const before = db
+        .prepare('SELECT COUNT(*) AS count FROM requests')
+        .get().count;
+
+      const response = await publish(users.qixiu, { expiresAt });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        error: 'expiresAt must be a valid future UTC ISO date',
+      });
+      expect(
+        db.prepare('SELECT COUNT(*) AS count FROM requests').get().count,
+      ).toBe(before);
+    },
+  );
+
+  it('normalizes an accepted UTC ISO expiry before storing it', async () => {
+    const response = await publish(users.qixiu, {
+      expiresAt: '2099-12-31T23:59:59Z',
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.request.expiresAt).toBe(FUTURE);
+    expect(
+      db
+        .prepare('SELECT expiresAt FROM requests WHERE id = ?')
+        .get(response.body.request.id).expiresAt,
+    ).toBe(FUTURE);
+  });
+
   it('reviews pending verifications without leaking private account fields', async () => {
     const pendingId = insertUser({
       account: 'verification-pending',
