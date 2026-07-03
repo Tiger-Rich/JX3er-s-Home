@@ -1,5 +1,5 @@
 import React, { StrictMode, useState } from 'react';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -278,12 +278,48 @@ describe('API client', () => {
     expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
   });
 
-  it('treats missing browser storage as an unavailable capability', () => {
+  it('falls back to memory when browser storage is missing', () => {
+    setToken(null);
     vi.stubGlobal('localStorage', undefined);
 
-    expect(getToken()).toBeNull();
-    expect(() => setToken('ignored-token')).not.toThrow();
+    expect(() => setToken('memory-token')).not.toThrow();
+    expect(getToken()).toBe('memory-token');
     expect(() => setToken(null)).not.toThrow();
+    expect(getToken()).toBeNull();
+  });
+
+  it('falls back to memory when browser storage operations throw', () => {
+    setToken(null);
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => { throw new Error('storage unavailable'); }),
+      setItem: vi.fn(() => { throw new Error('storage unavailable'); }),
+      removeItem: vi.fn(() => { throw new Error('storage unavailable'); }),
+    });
+
+    expect(() => setToken('memory-token')).not.toThrow();
+    expect(getToken()).toBe('memory-token');
+    expect(() => setToken(null)).not.toThrow();
+    expect(getToken()).toBeNull();
+  });
+
+  it('keeps the memory value when individual storage writes throw', () => {
+    setToken(null);
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => { throw new Error('write blocked'); }),
+      removeItem: vi.fn(),
+    });
+
+    setToken('memory-token');
+    expect(getToken()).toBe('memory-token');
+
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => 'stale-token'),
+      setItem: vi.fn(),
+      removeItem: vi.fn(() => { throw new Error('remove blocked'); }),
+    });
+    setToken(null);
+    expect(getToken()).toBeNull();
   });
 });
 
@@ -347,6 +383,85 @@ describe('App session flow', () => {
     await user.click(screen.getByRole('button', { name: '退出登录' }));
     expect(getToken()).toBeNull();
     expect(screen.getByRole('heading', { name: '登录番薯万事屋' })).toBeVisible();
+  });
+
+  it('uses the memory token for the session refresh when storage is unavailable', async () => {
+    vi.stubGlobal('localStorage', undefined);
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, { status: 401 }))
+      .mockResolvedValueOnce(jsonResponse({ token: 'memory-session-token' }))
+      .mockResolvedValueOnce(jsonResponse({ user: { id: 3, role: 'user' } }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('账号'), 'wanhua');
+    await user.type(screen.getByLabelText('密码'), 'secret123');
+    await user.click(screen.getByText('登录', { selector: 'button[type="submit"]' }));
+
+    expect(await screen.findByRole('button', { name: '万事广场' })).toBeVisible();
+    expect(getToken()).toBe('memory-session-token');
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/auth/me', expect.objectContaining({
+      headers: expect.objectContaining({
+        Authorization: 'Bearer memory-session-token',
+      }),
+    }));
+  });
+
+  it('does not store a login result or refresh the session after unmount', async () => {
+    const loginRequest = deferred();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, { status: 401 }))
+      .mockReturnValueOnce(loginRequest.promise);
+    const user = userEvent.setup();
+    const view = render(<App />);
+
+    await user.type(await screen.findByLabelText('账号'), 'wanhua');
+    await user.type(screen.getByLabelText('密码'), 'secret123');
+    await user.click(screen.getByText('登录', { selector: 'button[type="submit"]' }));
+    const loginSignal = fetch.mock.calls[1][1].signal;
+
+    view.unmount();
+    expect(loginSignal.aborted).toBe(true);
+    await act(async () => {
+      loginRequest.resolve(jsonResponse({ token: 'late-token' }));
+      await loginRequest.promise;
+    });
+
+    expect(getToken()).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets only the newest authentication response update the token and session', async () => {
+    const firstLogin = deferred();
+    const secondLogin = deferred();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, { status: 401 }))
+      .mockReturnValueOnce(firstLogin.promise)
+      .mockReturnValueOnce(secondLogin.promise)
+      .mockResolvedValueOnce(jsonResponse({ user: { id: 4, role: 'user' } }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('账号'), 'wanhua');
+    await user.type(screen.getByLabelText('密码'), 'secret123');
+    const form = screen.getByText('登录', { selector: 'button[type="submit"]' }).closest('form');
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch.mock.calls[1][1].signal.aborted).toBe(true);
+    await act(async () => {
+      secondLogin.resolve(jsonResponse({ token: 'newest-token' }));
+    });
+    expect(await screen.findByRole('button', { name: '万事广场' })).toBeVisible();
+
+    await act(async () => {
+      firstLogin.resolve(jsonResponse({ token: 'stale-token' }));
+    });
+    expect(getToken()).toBe('newest-token');
+    expect(fetch).toHaveBeenCalledTimes(4);
   });
 
   it('keeps the newest StrictMode refresh when an aborted request resolves out of order', async () => {

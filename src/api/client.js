@@ -1,5 +1,7 @@
 const TOKEN_KEY = 'fanshu-session-token';
 const unauthorizedListeners = new Set();
+let memoryToken = null;
+let storageNeedsSync = false;
 
 function getStorage() {
   try {
@@ -19,25 +21,44 @@ function getStorage() {
 }
 
 export function getToken() {
-  try {
-    return getStorage()?.getItem(TOKEN_KEY) ?? null;
-  } catch {
-    return null;
+  const storage = getStorage();
+  if (!storage) return memoryToken;
+
+  if (storageNeedsSync) {
+    try {
+      if (memoryToken) storage.setItem(TOKEN_KEY, memoryToken);
+      else storage.removeItem(TOKEN_KEY);
+      storageNeedsSync = false;
+    } catch {
+      return memoryToken;
+    }
   }
+
+  try {
+    memoryToken = storage.getItem(TOKEN_KEY) ?? null;
+  } catch {
+    storageNeedsSync = true;
+  }
+  return memoryToken;
 }
 
 export function setToken(token) {
+  memoryToken = token || null;
   const storage = getStorage();
-  if (!storage) return;
+  if (!storage) {
+    storageNeedsSync = true;
+    return;
+  }
 
   try {
-    if (token) {
-      storage.setItem(TOKEN_KEY, token);
-      return;
+    if (memoryToken) {
+      storage.setItem(TOKEN_KEY, memoryToken);
+    } else {
+      storage.removeItem(TOKEN_KEY);
     }
-    storage.removeItem(TOKEN_KEY);
+    storageNeedsSync = false;
   } catch {
-    // Storage can become unavailable after capability detection.
+    storageNeedsSync = true;
   }
 }
 
