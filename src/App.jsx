@@ -3,12 +3,19 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, setToken, subscribeUnauthorized } from './api/client.js';
 import AdminShell from './components/AdminShell.jsx';
 import AppShell from './components/AppShell.jsx';
+import ContactPage from './pages/ContactPage.jsx';
+import CreateRequestPage from './pages/CreateRequestPage.jsx';
+import FeedPage from './pages/FeedPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import ProfilePage from './pages/ProfilePage.jsx';
+import RequestDetailPage from './pages/RequestDetailPage.jsx';
 
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [authError, setAuthError] = useState('');
   const [activeTab, setActiveTab] = useState('feed');
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set(['feed']));
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [adminTab, setAdminTab] = useState('verifications');
   const mountedRef = useRef(false);
   const authenticationOwnerRef = useRef({ controller: null, version: 0 });
@@ -118,6 +125,14 @@ export default function App() {
     setAuthError('');
   }
 
+  function handleTabChange(tab) {
+    setActiveTab(tab);
+    setVisitedTabs((current) => {
+      if (current.has(tab)) return current;
+      return new Set([...current, tab]);
+    });
+  }
+
   if (session === undefined) {
     return (
       <main role="status" aria-live="polite" aria-busy="true">
@@ -151,10 +166,31 @@ export default function App() {
   return (
     <AppShell
       activeTab={activeTab}
-      onTabChange={setActiveTab}
+      onTabChange={handleTabChange}
       onLogout={handleLogout}
     >
-      <div aria-live="polite" data-active-tab={activeTab} />
+      {visitedTabs.has('feed') && (
+        <div hidden={activeTab !== 'feed'}>
+          {selectedRequestId ? (
+            <RequestDetailPage
+              requestId={selectedRequestId}
+              session={session}
+              onBack={() => setSelectedRequestId(null)}
+            />
+          ) : (
+            <FeedPage onSelectRequest={setSelectedRequestId} />
+          )}
+        </div>
+      )}
+      {visitedTabs.has('create') && (
+        <div hidden={activeTab !== 'create'}><CreateRequestPage session={session} /></div>
+      )}
+      {visitedTabs.has('contacts') && (
+        <div hidden={activeTab !== 'contacts'}><ContactPage /></div>
+      )}
+      {visitedTabs.has('profile') && (
+        <div hidden={activeTab !== 'profile'}><ProfilePage onSessionRefresh={refreshSession} /></div>
+      )}
     </AppShell>
   );
 }

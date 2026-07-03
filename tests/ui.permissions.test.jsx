@@ -9,7 +9,12 @@ import { api, getToken, setToken } from '../src/api/client.js';
 import AdminShell from '../src/components/AdminShell.jsx';
 import AppShell from '../src/components/AppShell.jsx';
 import StatusBadge from '../src/components/StatusBadge.jsx';
+import ContactPage from '../src/pages/ContactPage.jsx';
+import CreateRequestPage from '../src/pages/CreateRequestPage.jsx';
+import FeedPage from '../src/pages/FeedPage.jsx';
 import LoginPage from '../src/pages/LoginPage.jsx';
+import ProfilePage from '../src/pages/ProfilePage.jsx';
+import RequestDetailPage from '../src/pages/RequestDetailPage.jsx';
 
 function jsonResponse(body, init = {}) {
   return new Response(JSON.stringify(body), {
@@ -323,6 +328,210 @@ describe('API client', () => {
   });
 });
 
+describe('user workflow pages', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('never renders a request contact value before an application is approved', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      request: {
+        id: 12,
+        type: 'industry_consulting',
+        title: '聊聊产品转行',
+        description: '想请教行业路径。',
+        city: '上海',
+        remote: true,
+        industry: '互联网',
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        owner: {
+          nickname: '七秀同门',
+          server: '梦江南',
+          sect: '七秀',
+          verificationStatus: 'approved',
+          contactValue: 'wx-secret-before-approval',
+        },
+        contactValue: 'request-secret-before-approval',
+      },
+    }));
+
+    render(
+      <RequestDetailPage
+        requestId={12}
+        session={{ verificationStatus: 'approved' }}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: '聊聊产品转行' })).toBeVisible();
+    expect(screen.getByText('七秀同门')).toBeVisible();
+    expect(screen.queryByText(/secret-before-approval/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回万事广场' })).toBeVisible();
+    expect(screen.queryByText('匿名')).not.toBeInTheDocument();
+  });
+
+  it('shows publishing boundaries and disables unverified submission', () => {
+    render(<CreateRequestPage session={{ verificationStatus: 'pending' }} />);
+
+    expect(screen.getByText(
+      '万事屋不接账号交易、代练、外挂、私服相关委托，也不承诺求职或交易结果。',
+    )).toBeVisible();
+    expect(screen.getByRole('button', { name: '发布委托' })).toBeDisabled();
+    expect(screen.getByText('待掌柜审核')).toBeVisible();
+    expect(screen.queryByText('匿名')).not.toBeInTheDocument();
+  });
+
+  it('uses 我的名片 and requires server plus game nickname for verification', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      user: { nickname: '小七', city: null, contactValue: null },
+      profile: null,
+      verificationStatus: 'not_submitted',
+    }));
+
+    render(<ProfilePage onSessionRefresh={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', { name: '我的名片' })).toBeVisible();
+    expect(screen.queryByText('我的番薯名片')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('区服')).toBeRequired();
+    expect(screen.getByLabelText('游戏 ID/昵称')).toBeRequired();
+    expect(screen.getByText('我们不会索要游戏账号密码')).toBeVisible();
+  });
+
+  it('shows contact details only for approved applications and calls owner decisions', async () => {
+    const applications = [
+      {
+        id: 21,
+        direction: 'incoming',
+        status: 'pending',
+        requestTitle: '本地摄影帮忙',
+        applicantNickname: '万花',
+        ownerNickname: '七秀',
+        message: '我周末可以帮忙。',
+        contactValue: 'pending-secret',
+      },
+      {
+        id: 22,
+        direction: 'incoming',
+        status: 'pending',
+        requestTitle: '行业简历建议',
+        applicantNickname: '苍云',
+        ownerNickname: '七秀',
+        message: '可以先看一版简历。',
+      },
+      {
+        id: 23,
+        direction: 'outgoing',
+        status: 'approved',
+        requestTitle: '产品转行咨询',
+        applicantNickname: '七秀',
+        ownerNickname: '万花',
+        message: '想约半小时交流。',
+        contactValue: 'wx-approved-only',
+      },
+      {
+        id: 24,
+        direction: 'outgoing',
+        status: 'rejected',
+        requestTitle: '旧委托',
+        applicantNickname: '七秀',
+        ownerNickname: '唐门',
+        message: '此前申请。',
+        contactValue: 'rejected-secret',
+      },
+    ];
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/contact' && !options.method) {
+        return Promise.resolve(jsonResponse({ applications }));
+      }
+      if (path === '/api/contact/21/approve' || path === '/api/contact/22/reject') {
+        return Promise.resolve(jsonResponse({ application: {} }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<ContactPage />);
+
+    expect(await screen.findByText('本地摄影帮忙')).toBeVisible();
+    expect(screen.queryByText('pending-secret')).not.toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: '同意见面聊聊' })[0]);
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/contact/21/approve',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    await user.click(screen.getAllByRole('button', { name: '暂不合适' })[1]);
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/contact/22/reject',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+
+    await user.click(screen.getByRole('button', { name: '我递出' }));
+    expect(screen.getByText(/wx-approved-only/)).toBeVisible();
+    expect(screen.queryByText('rejected-secret')).not.toBeInTheDocument();
+  });
+
+  it('sorts priority request types first and sends encoded feed filters', async () => {
+    const requests = [
+      { id: 1, type: 'other', title: '最新普通委托', createdAt: '2026-07-03T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: false, city: '杭州', owner: {} },
+      { id: 2, type: 'job_referral', title: '较早内推', createdAt: '2026-07-01T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: true, city: null, owner: {} },
+      { id: 3, type: 'industry_consulting', title: '较新咨询', createdAt: '2026-07-02T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: true, city: '上海', owner: {} },
+    ];
+    fetch.mockResolvedValue(jsonResponse({ requests }));
+    render(<FeedPage onSelectRequest={() => {}} />);
+
+    const links = await screen.findAllByRole('button', { name: /查看委托/ });
+    expect(links.map((button) => button.textContent)).toEqual([
+      expect.stringContaining('较新咨询'),
+      expect.stringContaining('较早内推'),
+      expect.stringContaining('最新普通委托'),
+    ]);
+
+    fireEvent.change(screen.getByLabelText('城市'), { target: { value: '上海 浦东' } });
+    fireEvent.change(screen.getByLabelText('行业'), { target: { value: '游戏&互联网' } });
+    fireEvent.change(screen.getByLabelText('远程方式'), { target: { value: 'true' } });
+    await waitFor(() => {
+      const lastUrl = fetch.mock.calls.at(-1)[0];
+      expect(lastUrl).toContain('city=%E4%B8%8A%E6%B5%B7+%E6%B5%A6%E4%B8%9C');
+      expect(lastUrl).toContain('industry=%E6%B8%B8%E6%88%8F%26%E4%BA%92%E8%81%94%E7%BD%91');
+      expect(lastUrl).toContain('remote=true');
+    });
+  });
+
+  it('keeps a create draft mounted while switching bottom tabs', async () => {
+    fetch.mockImplementation((path) => {
+      if (path === '/api/auth/me') {
+        return Promise.resolve(jsonResponse({
+          user: { id: 9, role: 'user', nickname: '七秀' },
+          verificationStatus: 'approved',
+        }));
+      }
+      if (path === '/api/requests') return Promise.resolve(jsonResponse({ requests: [] }));
+      if (path === '/api/contact') return Promise.resolve(jsonResponse({ applications: [] }));
+      if (path === '/api/profile') {
+        return Promise.resolve(jsonResponse({
+          user: { nickname: '七秀' },
+          profile: { server: '梦江南', gameNickname: '秀秀' },
+          verificationStatus: 'approved',
+        }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '发个委托' }));
+    await user.type(screen.getByLabelText('标题'), '保留下来的委托草稿');
+    await user.click(screen.getByRole('button', { name: '我的名片' }));
+    await user.click(screen.getByRole('button', { name: '发个委托' }));
+    expect(screen.getByLabelText('标题')).toHaveValue('保留下来的委托草稿');
+  });
+});
+
 describe('App session flow', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -461,7 +670,8 @@ describe('App session flow', () => {
       firstLogin.resolve(jsonResponse({ token: 'stale-token' }));
     });
     expect(getToken()).toBe('newest-token');
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(5);
+    expect(fetch).toHaveBeenNthCalledWith(5, '/api/requests', expect.any(Object));
   });
 
   it('keeps the newest StrictMode refresh when an aborted request resolves out of order', async () => {
@@ -512,6 +722,7 @@ describe('App session flow', () => {
     setToken('expired-token');
     fetch
       .mockResolvedValueOnce(jsonResponse({ user: { id: 9, role: 'user' } }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }))
       .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, { status: 401 }));
     render(<App />);
 
