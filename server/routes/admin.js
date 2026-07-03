@@ -102,6 +102,7 @@ function verificationDto(row) {
       id: row.userId,
       nickname: row.nickname,
       city: row.city,
+      contactValue: row.contactValue,
       role: row.role,
       status: row.userStatus,
     },
@@ -121,7 +122,7 @@ function verificationDto(row) {
 const VERIFICATION_QUERY = `
   SELECT v.id, v.userId, v.status, v.supportMaterial, v.reviewerId,
          v.reviewedAt, v.rejectReason, v.createdAt, v.updatedAt,
-         u.nickname, u.city, u.role, u.status AS userStatus,
+         u.nickname, u.city, u.contactValue, u.role, u.status AS userStatus,
          p.server, p.gameNickname, p.sect, p.startedYear, p.industry,
          p.occupation, p.canOffer, p.lookingFor
   FROM verifications v
@@ -222,6 +223,18 @@ export function createAdminRouter(db) {
         const city = requiredText(req.query.city, 'city', 80);
         clauses.push('r.city = ?');
         values.push(city);
+      }
+      if (req.query.industry !== undefined) {
+        const industry = requiredText(req.query.industry, 'industry', 120);
+        clauses.push('r.industry = ?');
+        values.push(industry);
+      }
+      if (req.query.expired !== undefined) {
+        if (!['true', 'false'].includes(req.query.expired)) {
+          throw clientError(400, 'expired must be true or false');
+        }
+        clauses.push("(datetime(r.expiresAt) <= datetime('now')) = ?");
+        values.push(req.query.expired === 'true' ? 1 : 0);
       }
       const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
       const rows = db

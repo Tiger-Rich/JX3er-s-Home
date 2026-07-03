@@ -121,7 +121,7 @@ function publicRequestById(db, id) {
        JOIN users u ON u.id = r.ownerId
        LEFT JOIN profiles p ON p.userId = u.id
        LEFT JOIN verifications v ON v.userId = u.id
-       WHERE r.id = ? AND r.status = 'approved'
+       WHERE r.id = ? AND r.status = 'approved' AND u.status = 'active'
          AND datetime(r.expiresAt) > datetime('now')`,
     )
     .get(id);
@@ -143,6 +143,7 @@ export function createRequestsRouter(db) {
     try {
       const clauses = [
         "r.status = 'approved'",
+        "u.status = 'active'",
         "datetime(r.expiresAt) > datetime('now')",
       ];
       const values = [];

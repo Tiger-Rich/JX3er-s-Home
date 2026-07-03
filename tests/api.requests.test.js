@@ -81,15 +81,16 @@ describe('request, contact, and admin API', () => {
     expiresAt = FUTURE,
     city = 'Hangzhou',
     remote = 0,
+    industry = 'Technology',
   } = {}) {
     const result = db
       .prepare(
-        `INSERT INTO requests
+         `INSERT INTO requests
            (ownerId, type, title, description, city, remote, industry,
             budgetOrReward, expiresAt, status)
-         VALUES (?, ?, ?, 'Detailed request', ?, ?, 'Technology', 'Coffee', ?, ?)`,
+         VALUES (?, ?, ?, 'Detailed request', ?, ?, ?, 'Coffee', ?, ?)`,
       )
-      .run(ownerId, type, title, city, remote, expiresAt, status);
+      .run(ownerId, type, title, city, remote, industry, expiresAt, status);
     return Number(result.lastInsertRowid);
   }
 
@@ -310,6 +311,49 @@ describe('request, contact, and admin API', () => {
   });
 
   it.each([
+    ['taken down', { status: 'taken_down', expiresAt: FUTURE }],
+    ['expired', { status: 'approved', expiresAt: PAST }],
+  ])(
+    'does not approve contact after its request is %s but still permits rejection',
+    async (label, lifecycle) => {
+      const applicantId = insertUser({
+        account: `lifecycle-${label.replace(' ', '-')}`,
+      });
+      const requestId = insertRequest();
+      const applied = await request(app)
+        .post(`/api/requests/${requestId}/applications`)
+        .set(auth(applicantId))
+        .send({ message: 'Apply before the lifecycle changes' });
+      const applicationId = applied.body.application.id;
+      db.prepare(
+        'UPDATE requests SET status = ?, expiresAt = ? WHERE id = ?',
+      ).run(lifecycle.status, lifecycle.expiresAt, requestId);
+
+      const approval = await request(app)
+        .post(`/api/contact/${applicationId}/approve`)
+        .set(auth(users.qixiu));
+      const ownerView = await request(app)
+        .get(`/api/contact/${applicationId}`)
+        .set(auth(users.qixiu));
+      const applicantView = await request(app)
+        .get(`/api/contact/${applicationId}`)
+        .set(auth(applicantId));
+      const rejection = await request(app)
+        .post(`/api/contact/${applicationId}/reject`)
+        .set(auth(users.qixiu));
+
+      expect(approval.status).toBe(409);
+      expect(ownerView.body.application.status).toBe('pending');
+      expect(applicantView.body.application.status).toBe('pending');
+      expectNoKeys(ownerView.body, ['contactValue']);
+      expectNoKeys(applicantView.body, ['contactValue']);
+      expect(rejection.status).toBe(200);
+      expect(rejection.body.application.status).toBe('rejected');
+      expectNoKeys(rejection.body, ['contactValue']);
+    },
+  );
+
+  it.each([
     ['not_submitted', 'active', 403],
     ['pending', 'active', 403],
     ['rejected', 'active', 403],
@@ -408,6 +452,30 @@ describe('request, contact, and admin API', () => {
     expect(detail.status).toBe(404);
   });
 
+  it('hides an approved request everywhere after its owner is disabled', async () => {
+    const applicantId = insertUser({ account: 'disabled-owner-applicant' });
+    const requestId = insertRequest();
+
+    const disabled = await request(app)
+      .post(`/api/admin/users/${users.qixiu}/disable`)
+      .set(auth(users.admin));
+    const list = await request(app).get('/api/requests');
+    const detail = await request(app).get(`/api/requests/${requestId}`);
+    const favorite = await request(app)
+      .post(`/api/requests/${requestId}/favorite`)
+      .set(auth(applicantId));
+    const application = await request(app)
+      .post(`/api/requests/${requestId}/applications`)
+      .set(auth(applicantId))
+      .send({ message: 'This should no longer be available' });
+
+    expect(disabled.status).toBe(200);
+    expect(list.body.requests.map(({ id }) => id)).not.toContain(requestId);
+    expect(detail.status).toBe(404);
+    expect(favorite.status).toBe(404);
+    expect(application.status).toBe(404);
+  });
+
   it('validates publication fields, location, future UTC expiry, and positive IDs', async () => {
     const invalidType = await publish(users.qixiu, { type: 'account_trade' });
     const noLocation = await publish(users.qixiu, {
@@ -462,7 +530,7 @@ describe('request, contact, and admin API', () => {
     ).toBe(FUTURE);
   });
 
-  it('reviews pending verifications without leaking private account fields', async () => {
+  it('shows verification contact only to authenticated administrators', async () => {
     const pendingId = insertUser({
       account: 'verification-pending',
       verificationStatus: 'pending',
@@ -472,20 +540,38 @@ describe('request, contact, and admin API', () => {
       verificationStatus: 'pending',
     });
 
+    const anonymous = await request(app).get(
+      '/api/admin/verifications?status=pending',
+    );
+    const nonAdmin = await request(app)
+      .get('/api/admin/verifications?status=pending')
+      .set(auth(users.qixiu));
     const list = await request(app)
       .get('/api/admin/verifications?status=pending')
       .set(auth(users.admin));
+    const publicRequests = await request(app).get('/api/requests');
+    const reviewedRequests = await request(app)
+      .get('/api/admin/requests')
+      .set(auth(users.admin));
+
+    expect(anonymous.status).toBe(401);
+    expect(nonAdmin.status).toBe(403);
     expect(list.status).toBe(200);
     expect(list.body.verifications).toContainEqual(
       expect.objectContaining({
         userId: pendingId,
         status: 'pending',
         supportMaterial: 'private proof',
-        user: expect.objectContaining({ nickname: 'verification-pending' }),
+        user: expect.objectContaining({
+          nickname: 'verification-pending',
+          contactValue: 'verification-pending-contact',
+        }),
         profile: expect.objectContaining({ server: 'Dream River' }),
       }),
     );
-    expectNoKeys(list.body, ['passwordHash', 'contactValue', 'openid']);
+    expectNoKeys(list.body, ['passwordHash', 'openid']);
+    expectNoKeys(publicRequests.body, ['contactValue']);
+    expectNoKeys(reviewedRequests.body, ['contactValue']);
 
     const approved = await request(app)
       .post(`/api/admin/verifications/${pendingId}/approve`)
@@ -555,6 +641,50 @@ describe('request, contact, and admin API', () => {
       takedownReason: 'Policy violation',
     });
     expect(repeated.status).toBe(409);
+  });
+
+  it('filters reviewed requests by industry and expiration state', async () => {
+    const expiredTechnology = insertRequest({
+      industry: 'Technology',
+      expiresAt: PAST,
+    });
+    const currentTechnology = insertRequest({
+      industry: 'Technology',
+      expiresAt: FUTURE,
+    });
+    const expiredDesign = insertRequest({
+      industry: 'Design',
+      expiresAt: PAST,
+    });
+
+    const expired = await request(app)
+      .get('/api/admin/requests?industry=Technology&expired=true')
+      .set(auth(users.admin));
+    const current = await request(app)
+      .get('/api/admin/requests?industry=Technology&expired=false')
+      .set(auth(users.admin));
+    const invalid = await request(app)
+      .get('/api/admin/requests?expired=1')
+      .set(auth(users.admin));
+
+    expect(expired.status).toBe(200);
+    expect(expired.body.requests.map(({ id }) => id)).toContain(
+      expiredTechnology,
+    );
+    expect(expired.body.requests.map(({ id }) => id)).not.toContain(
+      currentTechnology,
+    );
+    expect(expired.body.requests.map(({ id }) => id)).not.toContain(
+      expiredDesign,
+    );
+    expect(current.status).toBe(200);
+    expect(current.body.requests.map(({ id }) => id)).toContain(
+      currentTechnology,
+    );
+    expect(current.body.requests.map(({ id }) => id)).not.toContain(
+      expiredTechnology,
+    );
+    expect(invalid.status).toBe(400);
   });
 
   it('lists safe filtered users and disables users without allowing admin self-lockout', async () => {

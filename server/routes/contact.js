@@ -100,14 +100,31 @@ export function createContactRouter(db) {
         if (existing.ownerId !== req.user.id) {
           return res.status(403).json({ error: 'Only the request owner may respond' });
         }
+        const lifecycleCondition =
+          status === 'approved'
+            ? `AND EXISTS (
+                 SELECT 1
+                 FROM requests r
+                 JOIN users requestOwner ON requestOwner.id = r.ownerId
+                 JOIN users applicant
+                   ON applicant.id = contact_applications.applicantId
+                 WHERE r.id = contact_applications.requestId
+                   AND r.ownerId = contact_applications.ownerId
+                   AND r.status = 'approved'
+                   AND datetime(r.expiresAt) > datetime('now')
+                   AND requestOwner.status = 'active'
+                   AND applicant.status = 'active'
+               )`
+            : '';
         const update = db
           .prepare(
             `UPDATE contact_applications
              SET status = ?, handledAt = CURRENT_TIMESTAMP,
                  updatedAt = CURRENT_TIMESTAMP
-             WHERE id = ? AND status = 'pending'`,
+             WHERE id = ? AND ownerId = ? AND status = 'pending'
+             ${lifecycleCondition}`,
           )
-          .run(status, id);
+          .run(status, id, req.user.id);
         if (update.changes === 0) {
           return res.status(409).json({
             error: 'Application cannot be changed in its current state',
