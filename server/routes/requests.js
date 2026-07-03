@@ -279,7 +279,7 @@ export function createRequestsRouter(db) {
     try {
       const targetId = positiveId(req.params.id);
       const reason = requiredText(req.body?.reason, 'reason', 500);
-      const target = db.prepare('SELECT id FROM requests WHERE id = ?').get(targetId);
+      const target = publicRequestById(db, targetId);
       if (!target) return res.status(404).json({ error: 'Request not found' });
       const result = db
         .prepare(

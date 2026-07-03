@@ -262,10 +262,20 @@ export function createAdminRouter(db) {
           values.push(reason);
         }
         values.push(id, fromStatus);
+        const approvalCondition =
+          toStatus === 'approved'
+            ? `AND datetime(expiresAt) > datetime('now')
+               AND EXISTS (
+                 SELECT 1 FROM users owner
+                 WHERE owner.id = requests.ownerId
+                   AND owner.status = 'active'
+               )`
+            : '';
         const update = db
           .prepare(
             `UPDATE requests SET ${assignments.join(', ')}
-             WHERE id = ? AND status = ?`,
+             WHERE id = ? AND status = ?
+             ${approvalCondition}`,
           )
           .run(...values);
         if (update.changes === 0) {

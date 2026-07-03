@@ -412,8 +412,8 @@ describe('request, contact, and admin API', () => {
     ).toBe(1);
   });
 
-  it('creates bound pending reports for existing requests and validates reason', async () => {
-    const requestId = insertRequest({ status: 'rejected' });
+  it('creates bound pending reports for public requests and validates reason', async () => {
+    const requestId = insertRequest();
     const blank = await request(app)
       .post(`/api/requests/${requestId}/report`)
       .set(auth(users.wanhua))
@@ -436,6 +436,37 @@ describe('request, contact, and admin API', () => {
       reason: "suspicious'; DROP TABLE reports; --",
       status: 'pending',
     });
+  });
+
+  it.each([
+    ['pending', { status: 'pending', expiresAt: FUTURE }],
+    ['rejected', { status: 'rejected', expiresAt: FUTURE }],
+    ['taken down', { status: 'taken_down', expiresAt: FUTURE }],
+    ['expired', { status: 'approved', expiresAt: PAST }],
+    [
+      'disabled owner',
+      { status: 'approved', expiresAt: FUTURE, disabled: true },
+    ],
+  ])('does not create a report for a %s request', async (_label, hidden) => {
+    const requestId = insertRequest(hidden);
+    if (hidden.disabled) {
+      db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(
+        users.qixiu,
+      );
+    }
+    const before = db
+      .prepare('SELECT COUNT(*) AS count FROM reports')
+      .get().count;
+
+    const response = await request(app)
+      .post(`/api/requests/${requestId}/report`)
+      .set(auth(users.wanhua))
+      .send({ reason: 'Hidden target' });
+
+    expect(response.status).toBe(404);
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM reports').get().count,
+    ).toBe(before);
   });
 
   it.each([
@@ -642,6 +673,34 @@ describe('request, contact, and admin API', () => {
     });
     expect(repeated.status).toBe(409);
   });
+
+  it.each([
+    ['expired', { expiresAt: PAST }],
+    ['owned by a disabled user', { disableOwner: true }],
+  ])(
+    'does not approve a pending request that is %s',
+    async (_label, invalid) => {
+      const requestId = insertRequest({
+        status: 'pending',
+        expiresAt: invalid.expiresAt,
+      });
+      if (invalid.disableOwner) {
+        db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(
+          users.qixiu,
+        );
+      }
+
+      const response = await request(app)
+        .post(`/api/admin/requests/${requestId}/approve`)
+        .set(auth(users.admin));
+
+      expect(response.status).toBe(409);
+      expect(
+        db.prepare('SELECT status FROM requests WHERE id = ?').get(requestId)
+          .status,
+      ).toBe('pending');
+    },
+  );
 
   it('filters reviewed requests by industry and expiration state', async () => {
     const expiredTechnology = insertRequest({
