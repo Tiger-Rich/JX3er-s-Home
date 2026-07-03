@@ -470,6 +470,83 @@ describe('user workflow pages', () => {
     expect(screen.getByRole('status')).toHaveTextContent('举报已提交，掌柜会核查。');
   });
 
+  it('locks every detail mutation while one action is pending', async () => {
+    const mutation = deferred();
+    fetch.mockImplementation((path) => {
+      if (path === '/api/requests/32') {
+        return Promise.resolve(jsonResponse({
+          request: {
+            id: 32, type: 'other', title: '并发保护委托', description: '测试动作锁。',
+            city: '杭州', remote: false, expiresAt: '2030-01-01T00:00:00.000Z', owner: {},
+          },
+        }));
+      }
+      if (path === '/api/requests/32/applications') return mutation.promise;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<RequestDetailPage requestId={32} session={{ verificationStatus: 'approved' }} onBack={() => {}} />);
+
+    await screen.findByRole('heading', { name: '并发保护委托' });
+    await user.type(screen.getByLabelText('一句话联系申请'), '我想进一步了解。');
+    await user.type(screen.getByLabelText('举报原因'), '备用举报内容');
+    await user.click(screen.getByRole('button', { name: '递出联系申请' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    for (const name of ['递出联系申请', '收藏委托', '确认举报']) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+    fireEvent.click(screen.getByRole('button', { name: '收藏委托' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认举报' }));
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    await act(async () => mutation.resolve(jsonResponse({ application: { id: 9 } }, { status: 201 })));
+    await waitFor(() => expect(screen.getByRole('button', { name: '收藏委托' })).toBeEnabled());
+  });
+
+  it('aborts a detail mutation and ignores its result after unmount', async () => {
+    const mutation = deferred();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        request: {
+          id: 33, type: 'other', title: '卸载保护委托', description: '测试卸载。',
+          city: '杭州', remote: false, expiresAt: '2030-01-01T00:00:00.000Z', owner: {},
+        },
+      }))
+      .mockReturnValueOnce(mutation.promise);
+    const user = userEvent.setup();
+    const view = render(<RequestDetailPage requestId={33} session={{ verificationStatus: 'approved' }} onBack={() => {}} />);
+
+    await screen.findByRole('heading', { name: '卸载保护委托' });
+    await user.type(screen.getByLabelText('一句话联系申请'), '卸载前申请');
+    await user.click(screen.getByRole('button', { name: '递出联系申请' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const mutationSignal = fetch.mock.calls[1][1].signal;
+
+    view.unmount();
+    expect(mutationSignal).toBeInstanceOf(AbortSignal);
+    expect(mutationSignal.aborted).toBe(true);
+    await act(async () => mutation.resolve(jsonResponse({ application: { id: 10 } }, { status: 201 })));
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('announces detail mutation failures as alerts', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        request: {
+          id: 34, type: 'other', title: '错误反馈委托', description: '测试错误。',
+          city: '杭州', remote: false, expiresAt: '2030-01-01T00:00:00.000Z', owner: {},
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ error: '收藏失败' }, { status: 500 }));
+    const user = userEvent.setup();
+    render(<RequestDetailPage requestId={34} session={{ verificationStatus: 'approved' }} onBack={() => {}} />);
+
+    await screen.findByRole('heading', { name: '错误反馈委托' });
+    await user.click(screen.getByRole('button', { name: '收藏委托' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('收藏失败');
+  });
+
   it('shows publishing boundaries and disables unverified submission', () => {
     render(<CreateRequestPage session={{ verificationStatus: 'pending' }} />);
 
@@ -554,6 +631,21 @@ describe('user workflow pages', () => {
     });
   });
 
+  it('does not infer create feedback semantics from message text', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ error: '审核服务暂不可用' }, { status: 503 }));
+    const user = userEvent.setup();
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    await user.type(screen.getByLabelText('标题'), '错误语义测试');
+    await user.type(screen.getByLabelText('委托说明'), '服务端错误必须是 alert。');
+    await user.click(screen.getByLabelText('可远程'));
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
+    await user.click(screen.getByRole('button', { name: '发布委托' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('审核服务暂不可用');
+    expect(screen.queryByRole('status', { name: '审核服务暂不可用' })).not.toBeInTheDocument();
+  });
+
   it('uses 我的名片 and requires server plus game nickname for verification', async () => {
     fetch.mockResolvedValueOnce(jsonResponse({
       user: { nickname: '小七', city: null, contactValue: null },
@@ -619,6 +711,101 @@ describe('user workflow pages', () => {
     ));
     expect(onSessionRefresh).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('status')).toHaveTextContent('认证资料已送交掌柜审核。');
+  });
+
+  it('prefills rejected verification data and preserves old support material on resubmit', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        user: { nickname: '小七', city: '南京', contactValue: 'wx-old' },
+        profile: { server: '梦江南', gameNickname: '秀秀' },
+        verificationStatus: 'rejected',
+        verification: {
+          status: 'rejected',
+          supportMaterial: '旧角色截图说明',
+          rejectReason: '截图中的区服信息不清晰',
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ profile: {}, verificationStatus: 'pending' }));
+    const user = userEvent.setup();
+    render(<ProfilePage onSessionRefresh={vi.fn()} />);
+
+    expect(await screen.findByLabelText('辅助认证材料')).toHaveValue('旧角色截图说明');
+    expect(screen.getByText('认证未通过原因：截图中的区服信息不清晰')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '提交身份认证' }));
+
+    await waitFor(() => {
+      const submission = fetch.mock.calls.find(([path]) => path === '/api/profile/verification');
+      expect(JSON.parse(submission[1].body).supportMaterial).toBe('旧角色截图说明');
+    });
+  });
+
+  it('keeps only the newest profile load when an aborted response arrives late', async () => {
+    const first = deferred();
+    const second = deferred();
+    fetch.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    render(<StrictMode><ProfilePage onSessionRefresh={vi.fn()} /></StrictMode>);
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+
+    await act(async () => second.resolve(jsonResponse({
+      user: { nickname: '新名片', city: null, contactValue: null },
+      profile: { server: '唯满侠', gameNickname: '新角色' },
+      verificationStatus: 'approved',
+      verification: { status: 'approved', supportMaterial: '新材料', rejectReason: null },
+    })));
+    expect(await screen.findByLabelText('昵称')).toHaveValue('新名片');
+
+    await act(async () => first.resolve(jsonResponse({
+      user: { nickname: '旧名片', city: null, contactValue: null },
+      profile: { server: '旧区服', gameNickname: '旧角色' },
+      verificationStatus: 'approved',
+      verification: { status: 'approved', supportMaterial: '旧材料', rejectReason: null },
+    })));
+    expect(screen.getByLabelText('昵称')).toHaveValue('新名片');
+    expect(screen.getByLabelText('辅助认证材料')).toHaveValue('新材料');
+  });
+
+  it('aborts profile submission and skips session refresh after unmount', async () => {
+    const submission = deferred();
+    const onSessionRefresh = vi.fn();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        user: { nickname: '小七', city: null, contactValue: null },
+        profile: { server: '梦江南', gameNickname: '秀秀' },
+        verificationStatus: 'not_submitted',
+        verification: { status: 'not_submitted', supportMaterial: null, rejectReason: null },
+      }))
+      .mockReturnValueOnce(submission.promise);
+    const user = userEvent.setup();
+    const view = render(<ProfilePage onSessionRefresh={onSessionRefresh} />);
+
+    await screen.findByRole('button', { name: '提交身份认证' });
+    await user.click(screen.getByRole('button', { name: '提交身份认证' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const submissionSignal = fetch.mock.calls[1][1].signal;
+
+    view.unmount();
+    expect(submissionSignal).toBeInstanceOf(AbortSignal);
+    expect(submissionSignal.aborted).toBe(true);
+    await act(async () => submission.resolve(jsonResponse({ profile: {}, verificationStatus: 'pending' })));
+    expect(onSessionRefresh).not.toHaveBeenCalled();
+  });
+
+  it('announces profile submission failures as alerts', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        user: { nickname: '小七', city: null, contactValue: null },
+        profile: { server: '梦江南', gameNickname: '秀秀' },
+        verificationStatus: 'not_submitted',
+      }))
+      .mockResolvedValueOnce(jsonResponse({ error: '认证提交失败' }, { status: 500 }));
+    const user = userEvent.setup();
+    render(<ProfilePage onSessionRefresh={vi.fn()} />);
+
+    await screen.findByRole('button', { name: '提交身份认证' });
+    await user.click(screen.getByRole('button', { name: '提交身份认证' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('认证提交失败');
   });
 
   it.each(['not_submitted', 'rejected'])('allows verification submission in %s status', async (verificationStatus) => {
@@ -730,6 +917,104 @@ describe('user workflow pages', () => {
     await user.click(screen.getByRole('button', { name: '我递出' }));
     expect(screen.getByText(/wx-approved-only/)).toBeVisible();
     expect(screen.queryByText('rejected-secret')).not.toBeInTheDocument();
+  });
+
+  it('locks all contact decisions while one mutation is pending', async () => {
+    const mutation = deferred();
+    const applications = [
+      { id: 61, direction: 'incoming', status: 'pending', requestTitle: '第一份申请', applicantNickname: '甲', message: '申请一' },
+      { id: 62, direction: 'incoming', status: 'pending', requestTitle: '第二份申请', applicantNickname: '乙', message: '申请二' },
+    ];
+    fetch.mockResolvedValueOnce(jsonResponse({ applications })).mockReturnValueOnce(mutation.promise);
+    const user = userEvent.setup();
+    render(<ContactPage />);
+
+    await screen.findByText('第一份申请');
+    await user.click(screen.getAllByRole('button', { name: '同意见面聊聊' })[0]);
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    for (const button of screen.getAllByRole('button', { name: /同意见面聊聊|暂不合适/ })) {
+      expect(button).toBeDisabled();
+    }
+    fireEvent.click(screen.getAllByRole('button', { name: '暂不合适' })[1]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts a contact mutation and does not reload after unmount', async () => {
+    const mutation = deferred();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ applications: [
+        { id: 63, direction: 'incoming', status: 'pending', requestTitle: '卸载申请', applicantNickname: '甲', message: '申请' },
+      ] }))
+      .mockReturnValueOnce(mutation.promise);
+    const user = userEvent.setup();
+    const view = render(<ContactPage />);
+
+    await screen.findByText('卸载申请');
+    await user.click(screen.getByRole('button', { name: '同意见面聊聊' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const mutationSignal = fetch.mock.calls[1][1].signal;
+
+    view.unmount();
+    expect(mutationSignal).toBeInstanceOf(AbortSignal);
+    expect(mutationSignal.aborted).toBe(true);
+    await act(async () => mutation.resolve(jsonResponse({ application: { id: 63, status: 'approved' } })));
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('prevents a late contact reload from replacing the newest list', async () => {
+    const oldReload = deferred();
+    const newReload = deferred();
+    const initial = [
+      { id: 71, direction: 'incoming', status: 'pending', requestTitle: '旧申请甲', applicantNickname: '甲', message: '一' },
+      { id: 72, direction: 'incoming', status: 'pending', requestTitle: '旧申请乙', applicantNickname: '乙', message: '二' },
+    ];
+    let getCount = 0;
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/contact' && !options.method) {
+        getCount += 1;
+        if (getCount === 1) return Promise.resolve(jsonResponse({ applications: initial }));
+        if (getCount === 2) return oldReload.promise;
+        if (getCount === 3) return newReload.promise;
+      }
+      if (path === '/api/contact/71/approve' || path === '/api/contact/72/reject') {
+        return Promise.resolve(jsonResponse({ application: {} }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<ContactPage />);
+
+    await screen.findByText('旧申请甲');
+    await user.click(screen.getAllByRole('button', { name: '同意见面聊聊' })[0]);
+    await waitFor(() => expect(getCount).toBe(2));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '暂不合适' })[1]).toBeEnabled());
+    await user.click(screen.getAllByRole('button', { name: '暂不合适' })[1]);
+    await waitFor(() => expect(getCount).toBe(3));
+
+    await act(async () => newReload.resolve(jsonResponse({ applications: [
+      { id: 73, direction: 'incoming', status: 'pending', requestTitle: '最新申请', applicantNickname: '丙', message: '新' },
+    ] })));
+    expect(await screen.findByText('最新申请')).toBeVisible();
+
+    await act(async () => oldReload.resolve(jsonResponse({ applications: [
+      { id: 74, direction: 'incoming', status: 'pending', requestTitle: '过期列表', applicantNickname: '丁', message: '旧' },
+    ] })));
+    expect(screen.getByText('最新申请')).toBeVisible();
+    expect(screen.queryByText('过期列表')).not.toBeInTheDocument();
+  });
+
+  it('announces contact mutation failures as alerts', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ applications: [
+        { id: 81, direction: 'incoming', status: 'pending', requestTitle: '错误申请', applicantNickname: '甲', message: '申请' },
+      ] }))
+      .mockResolvedValueOnce(jsonResponse({ error: '处理申请失败' }, { status: 500 }));
+    const user = userEvent.setup();
+    render(<ContactPage />);
+
+    await screen.findByText('错误申请');
+    await user.click(screen.getByRole('button', { name: '同意见面聊聊' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('处理申请失败');
   });
 
   it('sorts priority request types first and sends encoded feed filters', async () => {

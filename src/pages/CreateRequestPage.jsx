@@ -12,37 +12,37 @@ const initialForm = {
 export default function CreateRequestPage({ session }) {
   const [form, setForm] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState(null);
   const approved = session?.verificationStatus === 'approved';
 
   function update(event) {
     const { name, type, checked, value } = event.target;
     setForm((current) => ({ ...current, [name]: type === 'checkbox' ? checked : value }));
-    setFeedback('');
+    setFeedback(null);
   }
 
   async function submit(event) {
     event.preventDefault();
     if (!approved) return;
     if (!requestTypes.some((type) => type.value === form.type)) {
-      setFeedback('请选择委托类型。');
+      setFeedback({ type: 'error', message: '请选择委托类型。' });
       return;
     }
     if (!form.title.trim()) {
-      setFeedback('请填写标题。');
+      setFeedback({ type: 'error', message: '请填写标题。' });
       return;
     }
     if (!form.description.trim()) {
-      setFeedback('请填写委托说明。');
+      setFeedback({ type: 'error', message: '请填写委托说明。' });
       return;
     }
     if (!form.city.trim() && !form.remote) {
-      setFeedback('请填写城市，或选择可远程。');
+      setFeedback({ type: 'error', message: '请填写城市，或选择可远程。' });
       return;
     }
     const expiry = new Date(form.expiresAt);
     if (Number.isNaN(expiry.getTime()) || expiry.getTime() <= Date.now()) {
-      setFeedback('请选择未来的有效期。');
+      setFeedback({ type: 'error', message: '请选择未来的有效期。' });
       return;
     }
     setSubmitting(true);
@@ -60,10 +60,10 @@ export default function CreateRequestPage({ session }) {
           expiresAt: expiry.toISOString(),
         },
       });
-      setFeedback('委托已送交掌柜审核。');
+      setFeedback({ type: 'success', message: '委托已送交掌柜审核。' });
       setForm(initialForm);
     } catch (error) {
-      setFeedback(error.message || '暂时无法发布委托');
+      setFeedback({ type: 'error', message: error.message || '暂时无法发布委托' });
     } finally {
       setSubmitting(false);
     }
@@ -88,7 +88,7 @@ export default function CreateRequestPage({ session }) {
           <Send aria-hidden="true" size={18} />发布委托
         </button>
       </form>
-      {feedback && <p role={feedback.includes('审核') ? 'status' : 'alert'}>{feedback}</p>}
+      {feedback && <p role={feedback.type === 'success' ? 'status' : 'alert'}>{feedback.message}</p>}
     </section>
   );
 }

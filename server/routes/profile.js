@@ -12,6 +12,15 @@ function loadProfile(db, userId) {
     .get(userId);
 }
 
+function loadVerification(db, userId) {
+  return db
+    .prepare(
+      `SELECT status, supportMaterial, rejectReason
+       FROM verifications WHERE userId = ?`,
+    )
+    .get(userId);
+}
+
 function safeUser(user) {
   const { verificationStatus, ...result } = user;
   return result;
@@ -95,6 +104,7 @@ export function createProfileRouter(db) {
       user: safeUser(req.user),
       profile: loadProfile(db, req.user.id),
       verificationStatus: req.user.verificationStatus,
+      verification: loadVerification(db, req.user.id),
     });
   });
 

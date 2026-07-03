@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 
 import { api } from '../api/client.js';
@@ -8,23 +8,44 @@ export default function ContactPage() {
   const [direction, setDirection] = useState('incoming');
   const [state, setState] = useState({ loading: true, error: '', applications: [] });
   const [busyId, setBusyId] = useState(null);
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  const mountedRef = useRef(false);
+  const loadOwnerRef = useRef({ controller: null, version: 0 });
+  const mutationOwnerRef = useRef({ controller: null, version: 0 });
 
-  const loadApplications = useCallback(async (signal) => {
+  const loadApplications = useCallback(async () => {
+    const owner = loadOwnerRef.current;
+    owner.controller?.abort();
+    const controller = new AbortController();
+    const requestId = owner.version + 1;
+    owner.version = requestId;
+    owner.controller = controller;
     try {
-      const result = await api('/api/contact', signal ? { signal } : {});
+      const result = await api('/api/contact', { signal: controller.signal });
+      if (!mountedRef.current || owner.version !== requestId) return;
       setState({ loading: false, error: '', applications: result.applications ?? [] });
     } catch (error) {
-      if (error.name !== 'AbortError') {
-        setState({ loading: false, error: error.message || '暂时无法加载联系申请', applications: [] });
-      }
+      if (!mountedRef.current || owner.version !== requestId || error.name === 'AbortError') return;
+      setState({ loading: false, error: error.message || '暂时无法加载联系申请', applications: [] });
+    } finally {
+      if (owner.version === requestId) owner.controller = null;
     }
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    loadApplications(controller.signal);
-    return () => controller.abort();
+    mountedRef.current = true;
+    loadApplications();
+    return () => {
+      mountedRef.current = false;
+      const loadOwner = loadOwnerRef.current;
+      loadOwner.version += 1;
+      loadOwner.controller?.abort();
+      loadOwner.controller = null;
+      const mutationOwner = mutationOwnerRef.current;
+      mutationOwner.version += 1;
+      mutationOwner.controller?.abort();
+      mutationOwner.controller = null;
+    };
   }, [loadApplications]);
 
   const applications = useMemo(
@@ -33,16 +54,36 @@ export default function ContactPage() {
   );
 
   async function decide(id, decision) {
+    const owner = mutationOwnerRef.current;
+    if (owner.controller) return;
+    const controller = new AbortController();
+    const requestId = owner.version + 1;
+    owner.version = requestId;
+    owner.controller = controller;
     setBusyId(id);
-    setFeedback('');
+    setFeedback(null);
     try {
-      await api(`/api/contact/${id}/${decision}`, { method: 'POST' });
-      setFeedback(decision === 'approve' ? '已同意见面聊聊。' : '已回复暂不合适。');
-      await loadApplications();
+      await api(`/api/contact/${id}/${decision}`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
+      if (!mountedRef.current || owner.version !== requestId) return;
+      setFeedback({
+        type: 'success',
+        message: decision === 'approve' ? '已同意见面聊聊。' : '已回复暂不合适。',
+      });
+      loadApplications();
     } catch (error) {
-      setFeedback(error.status === 409 ? `未能处理：${error.message}` : error.message || '暂时无法处理申请');
+      if (!mountedRef.current || owner.version !== requestId || error.name === 'AbortError') return;
+      setFeedback({
+        type: 'error',
+        message: error.status === 409 ? `未能处理：${error.message}` : error.message || '暂时无法处理申请',
+      });
     } finally {
-      setBusyId(null);
+      if (owner.version === requestId) {
+        owner.controller = null;
+        if (mountedRef.current) setBusyId(null);
+      }
     }
   }
 
@@ -67,10 +108,10 @@ export default function ContactPage() {
             {application.status === 'approved' && application.contactValue && <p>联系方式：{application.contactValue}</p>}
             {direction === 'incoming' && application.status === 'pending' && (
               <div>
-                <button type="button" disabled={busyId === application.id} onClick={() => decide(application.id, 'approve')}>
+                <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'approve')}>
                   <Check aria-hidden="true" size={18} />同意见面聊聊
                 </button>
-                <button type="button" disabled={busyId === application.id} onClick={() => decide(application.id, 'reject')}>
+                <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'reject')}>
                   <X aria-hidden="true" size={18} />暂不合适
                 </button>
               </div>
@@ -78,7 +119,7 @@ export default function ContactPage() {
           </article>
         );
       })}
-      {feedback && <p role="status" aria-live="polite">{feedback}</p>}
+      {feedback && <p role={feedback.type === 'success' ? 'status' : 'alert'} aria-live="polite">{feedback.message}</p>}
     </section>
   );
 }

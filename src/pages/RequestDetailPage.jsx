@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Bookmark, Flag, Send } from 'lucide-react';
 
 import { api } from '../api/client.js';
@@ -12,35 +12,87 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
   const [state, setState] = useState({ loading: true, error: '', request: null });
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState('');
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState(null);
   const [busyAction, setBusyAction] = useState('');
+  const mountedRef = useRef(false);
+  const loadOwnerRef = useRef({ controller: null, version: 0 });
+  const mutationOwnerRef = useRef({ controller: null, version: 0 });
   const approved = session?.verificationStatus === 'approved';
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const loadOwner = loadOwnerRef.current;
+      loadOwner.version += 1;
+      loadOwner.controller?.abort();
+      loadOwner.controller = null;
+      const mutationOwner = mutationOwnerRef.current;
+      mutationOwner.version += 1;
+      mutationOwner.controller?.abort();
+      mutationOwner.controller = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const owner = loadOwnerRef.current;
+    owner.controller?.abort();
     const controller = new AbortController();
+    const loadId = owner.version + 1;
+    owner.version = loadId;
+    owner.controller = controller;
     setState({ loading: true, error: '', request: null });
     api(`/api/requests/${requestId}`, { signal: controller.signal })
-      .then((result) => setState({ loading: false, error: '', request: result.request }))
+      .then((result) => {
+        if (!mountedRef.current || owner.version !== loadId) return;
+        setState({ loading: false, error: '', request: result.request });
+      })
       .catch((error) => {
-        if (error.name !== 'AbortError') {
-          setState({ loading: false, error: error.message || '暂时无法加载委托', request: null });
-        }
+        if (!mountedRef.current || owner.version !== loadId || error.name === 'AbortError') return;
+        setState({ loading: false, error: error.message || '暂时无法加载委托', request: null });
+      })
+      .finally(() => {
+        if (owner.version === loadId) owner.controller = null;
       });
-    return () => controller.abort();
+    return () => {
+      if (owner.version === loadId) {
+        owner.version += 1;
+        owner.controller?.abort();
+        owner.controller = null;
+      }
+    };
   }, [requestId]);
 
   async function runAction(action, path, body, successMessage) {
+    const owner = mutationOwnerRef.current;
+    if (owner.controller) return;
+    const controller = new AbortController();
+    const mutationId = owner.version + 1;
+    owner.version = mutationId;
+    owner.controller = controller;
     setBusyAction(action);
-    setFeedback('');
+    setFeedback(null);
     try {
-      await api(path, { method: 'POST', ...(body ? { body } : {}) });
-      setFeedback(successMessage);
+      await api(path, {
+        method: 'POST',
+        signal: controller.signal,
+        ...(body ? { body } : {}),
+      });
+      if (!mountedRef.current || owner.version !== mutationId) return;
+      setFeedback({ type: 'success', message: successMessage });
       if (action === 'application') setMessage('');
       if (action === 'report') setReason('');
     } catch (error) {
-      setFeedback(error.status === 409 ? `未能完成：${error.message}` : error.message || '暂时无法完成操作');
+      if (!mountedRef.current || owner.version !== mutationId || error.name === 'AbortError') return;
+      setFeedback({
+        type: 'error',
+        message: error.status === 409 ? `未能完成：${error.message}` : error.message || '暂时无法完成操作',
+      });
     } finally {
-      setBusyAction('');
+      if (owner.version === mutationId) {
+        owner.controller = null;
+        if (mountedRef.current) setBusyAction('');
+      }
     }
   }
 
@@ -81,7 +133,7 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
               runAction('application', `/api/requests/${requestId}/applications`, { message }, '联系申请已递出，请等对方回应。');
             }}>
               <label>一句话联系申请<input value={message} onChange={(event) => setMessage(event.target.value)} required maxLength={1000} /></label>
-              <button type="submit" disabled={busyAction === 'application'}>
+              <button type="submit" disabled={Boolean(busyAction)}>
                 <Send aria-hidden="true" size={18} />递出联系申请
               </button>
             </form>
@@ -89,7 +141,7 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
 
           <button
             type="button"
-            disabled={!approved || busyAction === 'favorite'}
+            disabled={!approved || Boolean(busyAction)}
             onClick={() => runAction('favorite', `/api/requests/${requestId}/favorite`, null, '已收藏这份委托。')}
           >
             <Bookmark aria-hidden="true" size={18} />收藏委托
@@ -100,11 +152,11 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
             runAction('report', `/api/requests/${requestId}/report`, { reason }, '举报已提交，掌柜会核查。');
           }}>
             <label>举报原因<textarea value={reason} onChange={(event) => setReason(event.target.value)} required maxLength={500} /></label>
-            <button type="submit" disabled={busyAction === 'report'}>
+            <button type="submit" disabled={Boolean(busyAction)}>
               <Flag aria-hidden="true" size={18} />确认举报
             </button>
           </form>
-          {feedback && <p role="status" aria-live="polite">{feedback}</p>}
+          {feedback && <p role={feedback.type === 'success' ? 'status' : 'alert'} aria-live="polite">{feedback.message}</p>}
         </>
       )}
     </section>

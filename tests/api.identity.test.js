@@ -273,8 +273,44 @@ describe('identity API', () => {
       lookingFor: null,
     });
     expect(response.body.verificationStatus).toBe('not_submitted');
+    expect(response.body.verification).toEqual({
+      status: 'not_submitted',
+      supportMaterial: null,
+      rejectReason: null,
+    });
     expect(JSON.stringify(response.body)).not.toContain('second');
     expectNoPasswordHash(response.body);
+  });
+
+  it('returns the current user verification material and rejection reason without reviewer metadata', async () => {
+    const registration = await register();
+    db.prepare(
+      `UPDATE verifications
+       SET status = 'rejected', supportMaterial = ?, rejectReason = ?,
+           reviewerId = ?, reviewedAt = CURRENT_TIMESTAMP
+       WHERE userId = ?`,
+    ).run(
+      'existing character screenshot',
+      '区服截图不够清晰',
+      registration.body.user.id,
+      registration.body.user.id,
+    );
+
+    const response = await request(app)
+      .get('/api/profile')
+      .set('Authorization', `Bearer ${registration.body.token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.verificationStatus).toBe('rejected');
+    expect(response.body.verification).toEqual({
+      status: 'rejected',
+      supportMaterial: 'existing character screenshot',
+      rejectReason: '区服截图不够清晰',
+    });
+    expect(response.body.verification).not.toHaveProperty('reviewerId');
+    expect(response.body.verification).not.toHaveProperty('reviewedAt');
+    expect(JSON.stringify(response.body)).not.toContain('reviewerId');
+    expect(JSON.stringify(response.body)).not.toContain('reviewedAt');
   });
 
   it('returns only explicit public identity and profile DTO fields', async () => {
@@ -320,6 +356,9 @@ describe('identity API', () => {
     );
     expect(Object.keys(ownProfile.body.profile).sort()).toEqual(
       expectedProfileFields,
+    );
+    expect(Object.keys(ownProfile.body.verification).sort()).toEqual(
+      ['status', 'supportMaterial', 'rejectReason'].sort(),
     );
 
     const submission = await request(app)
