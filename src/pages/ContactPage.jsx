@@ -72,7 +72,7 @@ export default function ContactPage() {
         type: 'success',
         message: decision === 'approve' ? '已同意见面聊聊。' : '已回复暂不合适。',
       });
-      loadApplications();
+      await loadApplications();
     } catch (error) {
       if (!mountedRef.current || owner.version !== requestId || error.name === 'AbortError') return;
       setFeedback({

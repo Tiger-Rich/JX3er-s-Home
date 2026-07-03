@@ -614,6 +614,46 @@ describe('user workflow pages', () => {
     expect(screen.getByRole('status')).toHaveTextContent('委托已送交掌柜审核。');
   });
 
+  it('uses a synchronous lock to prevent same-tick duplicate request submissions', async () => {
+    const submission = deferred();
+    fetch.mockReturnValue(submission.promise);
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '同步锁测试' } });
+    fireEvent.change(screen.getByLabelText('委托说明'), { target: { value: '连续提交只能发出一个请求。' } });
+    fireEvent.click(screen.getByLabelText('可远程'));
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
+    const form = screen.getByRole('button', { name: '发布委托' }).closest('form');
+
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await act(async () => submission.resolve(jsonResponse({ request: { id: 43, status: 'pending' } }, { status: 201 })));
+  });
+
+  it('aborts create submission and ignores its result after unmount', async () => {
+    const submission = deferred();
+    fetch.mockReturnValueOnce(submission.promise);
+    const view = render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '卸载保护测试' } });
+    fireEvent.change(screen.getByLabelText('委托说明'), { target: { value: '卸载后不再更新表单。' } });
+    fireEvent.click(screen.getByLabelText('可远程'));
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
+    fireEvent.submit(screen.getByRole('button', { name: '发布委托' }).closest('form'));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const signal = fetch.mock.calls[0][1].signal;
+
+    view.unmount();
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal.aborted).toBe(true);
+    await act(async () => submission.resolve(jsonResponse({ request: { id: 44, status: 'pending' } }, { status: 201 })));
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('allows an approved local request with a city and remote false', async () => {
     fetch.mockResolvedValueOnce(jsonResponse({ request: { id: 42, status: 'pending' } }, { status: 201 }));
     const user = userEvent.setup();
@@ -961,36 +1001,40 @@ describe('user workflow pages', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('prevents a late contact reload from replacing the newest list', async () => {
-    const oldReload = deferred();
-    const newReload = deferred();
-    const initial = [
-      { id: 71, direction: 'incoming', status: 'pending', requestTitle: '旧申请甲', applicantNickname: '甲', message: '一' },
-      { id: 72, direction: 'incoming', status: 'pending', requestTitle: '旧申请乙', applicantNickname: '乙', message: '二' },
+  it('keeps every contact decision disabled until the success reload completes', async () => {
+    const reload = deferred();
+    const applications = [
+      { id: 64, direction: 'incoming', status: 'pending', requestTitle: '等待刷新甲', applicantNickname: '甲', message: '申请一' },
+      { id: 65, direction: 'incoming', status: 'pending', requestTitle: '等待刷新乙', applicantNickname: '乙', message: '申请二' },
     ];
-    let getCount = 0;
-    fetch.mockImplementation((path, options = {}) => {
-      if (path === '/api/contact' && !options.method) {
-        getCount += 1;
-        if (getCount === 1) return Promise.resolve(jsonResponse({ applications: initial }));
-        if (getCount === 2) return oldReload.promise;
-        if (getCount === 3) return newReload.promise;
-      }
-      if (path === '/api/contact/71/approve' || path === '/api/contact/72/reject') {
-        return Promise.resolve(jsonResponse({ application: {} }));
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    });
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ applications }))
+      .mockResolvedValueOnce(jsonResponse({ application: { id: 64, status: 'approved' } }))
+      .mockReturnValueOnce(reload.promise);
     const user = userEvent.setup();
     render(<ContactPage />);
 
-    await screen.findByText('旧申请甲');
+    await screen.findByText('等待刷新甲');
     await user.click(screen.getAllByRole('button', { name: '同意见面聊聊' })[0]);
-    await waitFor(() => expect(getCount).toBe(2));
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '暂不合适' })[1]).toBeEnabled());
-    await user.click(screen.getAllByRole('button', { name: '暂不合适' })[1]);
-    await waitFor(() => expect(getCount).toBe(3));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    for (const button of screen.getAllByRole('button', { name: /同意见面聊聊|暂不合适/ })) {
+      expect(button).toBeDisabled();
+    }
+    fireEvent.click(screen.getAllByRole('button', { name: '暂不合适' })[1]);
+    expect(fetch).toHaveBeenCalledTimes(3);
 
+    await act(async () => reload.resolve(jsonResponse({ applications })));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '暂不合适' })[1]).toBeEnabled());
+  });
+
+  it('prevents a late contact reload from replacing the newest list', async () => {
+    const oldReload = deferred();
+    const newReload = deferred();
+    fetch.mockReturnValueOnce(oldReload.promise).mockReturnValueOnce(newReload.promise);
+    render(<StrictMode><ContactPage /></StrictMode>);
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
     await act(async () => newReload.resolve(jsonResponse({ applications: [
       { id: 73, direction: 'incoming', status: 'pending', requestTitle: '最新申请', applicantNickname: '丙', message: '新' },
     ] })));

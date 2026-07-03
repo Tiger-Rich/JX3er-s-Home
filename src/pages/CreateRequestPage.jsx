@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Send } from 'lucide-react';
 
 import { api } from '../api/client.js';
@@ -13,7 +13,20 @@ export default function CreateRequestPage({ session }) {
   const [form, setForm] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const mountedRef = useRef(false);
+  const submissionOwnerRef = useRef({ controller: null, version: 0 });
   const approved = session?.verificationStatus === 'approved';
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const owner = submissionOwnerRef.current;
+      owner.version += 1;
+      owner.controller?.abort();
+      owner.controller = null;
+    };
+  }, []);
 
   function update(event) {
     const { name, type, checked, value } = event.target;
@@ -24,6 +37,8 @@ export default function CreateRequestPage({ session }) {
   async function submit(event) {
     event.preventDefault();
     if (!approved) return;
+    const owner = submissionOwnerRef.current;
+    if (owner.controller) return;
     if (!requestTypes.some((type) => type.value === form.type)) {
       setFeedback({ type: 'error', message: '请选择委托类型。' });
       return;
@@ -45,10 +60,15 @@ export default function CreateRequestPage({ session }) {
       setFeedback({ type: 'error', message: '请选择未来的有效期。' });
       return;
     }
+    const controller = new AbortController();
+    const requestId = owner.version + 1;
+    owner.version = requestId;
+    owner.controller = controller;
     setSubmitting(true);
     try {
       await api('/api/requests', {
         method: 'POST',
+        signal: controller.signal,
         body: {
           type: form.type,
           title: form.title.trim(),
@@ -60,12 +80,17 @@ export default function CreateRequestPage({ session }) {
           expiresAt: expiry.toISOString(),
         },
       });
+      if (!mountedRef.current || owner.version !== requestId) return;
       setFeedback({ type: 'success', message: '委托已送交掌柜审核。' });
       setForm(initialForm);
     } catch (error) {
+      if (!mountedRef.current || owner.version !== requestId || error.name === 'AbortError') return;
       setFeedback({ type: 'error', message: error.message || '暂时无法发布委托' });
     } finally {
-      setSubmitting(false);
+      if (owner.version === requestId) {
+        owner.controller = null;
+        if (mountedRef.current) setSubmitting(false);
+      }
     }
   }
 
