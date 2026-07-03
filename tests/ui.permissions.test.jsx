@@ -1,9 +1,10 @@
-import React from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import React, { StrictMode, useState } from 'react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from '../src/App.jsx';
+import * as apiClientModule from '../src/api/client.js';
 import { api, getToken, setToken } from '../src/api/client.js';
 import AdminShell from '../src/components/AdminShell.jsx';
 import AppShell from '../src/components/AppShell.jsx';
@@ -16,6 +17,16 @@ function jsonResponse(body, init = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   });
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }
 
 describe('application shells', () => {
@@ -107,6 +118,10 @@ describe('LoginPage', () => {
       password: 'secret123',
     });
     expect(screen.getByRole('button', { name: '登录中…' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+    const modeGroup = screen.getByRole('group', { name: '账号操作' });
+    expect(within(modeGroup).getByRole('button', { name: '登录' })).toBeDisabled();
+    expect(within(modeGroup).getByRole('button', { name: '注册' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: '登录中…' }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
 
@@ -116,6 +131,31 @@ describe('LoginPage', () => {
         screen.getByText('登录', { selector: 'button[type="submit"]' }),
       ).toBeEnabled();
     });
+  });
+
+  it('clears a server error when switching mode or starting to edit', async () => {
+    function LoginHarness() {
+      const [error, setError] = useState('服务端拒绝了本次登录');
+      return (
+        <LoginPage
+          error={error}
+          onErrorClear={() => setError('')}
+          onSubmit={vi.fn()}
+        />
+      );
+    }
+
+    const user = userEvent.setup();
+    const { rerender } = render(<LoginHarness />);
+    expect(screen.getByRole('alert')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '注册' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    rerender(<LoginHarness key="editing" />);
+    expect(screen.getByRole('alert')).toBeVisible();
+    await user.type(screen.getByLabelText('账号'), 'q');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
 
@@ -159,6 +199,92 @@ describe('API client', () => {
       status: 429,
     });
   });
+
+  it('uses status before parsing and logs out a token owner on malformed 401 JSON', async () => {
+    const onUnauthorized = vi.fn();
+    const unsubscribe = apiClientModule.subscribeUnauthorized(onUnauthorized);
+    setToken('expired-token');
+    fetch.mockResolvedValueOnce(
+      new Response('{broken', {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(api('/api/requests')).rejects.toMatchObject({
+      message: 'Request failed (401)',
+      status: 401,
+    });
+    expect(getToken()).toBeNull();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('does not publish unauthorized events for tokenless login failures', async () => {
+    const onUnauthorized = vi.fn();
+    const unsubscribe = apiClientModule.subscribeUnauthorized(onUnauthorized);
+    fetch.mockResolvedValueOnce(
+      jsonResponse({ error: 'Invalid account or password' }, { status: 401 }),
+    );
+
+    await expect(
+      api('/api/auth/login', {
+        method: 'POST',
+        body: { account: 'qixiu', password: 'wrong' },
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('can suppress global unauthorized effects for owned session refreshes', async () => {
+    const onUnauthorized = vi.fn();
+    const unsubscribe = apiClientModule.subscribeUnauthorized(onUnauthorized);
+    setToken('possibly-stale-token');
+    fetch.mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, { status: 401 }));
+
+    await expect(
+      api('/api/auth/me', { notifyUnauthorized: false }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(getToken()).toBe('possibly-stale-token');
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(fetch.mock.calls[0][1]).not.toHaveProperty('notifyUnauthorized');
+    unsubscribe();
+  });
+
+  it('rejects successful malformed JSON with a stable response error', async () => {
+    fetch.mockResolvedValueOnce(
+      new Response('{broken', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(api('/api/broken')).rejects.toMatchObject({
+      message: 'Invalid server response',
+    });
+  });
+
+  it('forwards AbortSignal and preserves AbortError', async () => {
+    const controller = new AbortController();
+    fetch.mockImplementationOnce((_path, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason));
+    }));
+
+    const request = api('/api/slow', { signal: controller.signal });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
+  });
+
+  it('treats missing browser storage as an unavailable capability', () => {
+    vi.stubGlobal('localStorage', undefined);
+
+    expect(getToken()).toBeNull();
+    expect(() => setToken('ignored-token')).not.toThrow();
+    expect(() => setToken(null)).not.toThrow();
+  });
 });
 
 describe('App session flow', () => {
@@ -178,6 +304,14 @@ describe('App session flow', () => {
 
     expect(await screen.findByRole('heading', { name: '登录番薯万事屋' })).toBeVisible();
     expect(fetch).toHaveBeenCalledWith('/api/auth/me', expect.any(Object));
+  });
+
+  it('announces session loading accessibly', () => {
+    fetch.mockReturnValueOnce(new Promise(() => {}));
+    render(<App />);
+
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true');
   });
 
   it.each([
@@ -213,5 +347,71 @@ describe('App session flow', () => {
     await user.click(screen.getByRole('button', { name: '退出登录' }));
     expect(getToken()).toBeNull();
     expect(screen.getByRole('heading', { name: '登录番薯万事屋' })).toBeVisible();
+  });
+
+  it('keeps the newest StrictMode refresh when an aborted request resolves out of order', async () => {
+    const requests = [];
+    setToken('current-token');
+    fetch.mockImplementation((path, options) => {
+      const request = deferred();
+      requests.push({ ...request, options, path });
+      return request.promise;
+    });
+
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0].options.signal.aborted).toBe(true);
+
+    await act(async () => {
+      requests[1].resolve(jsonResponse({ user: { id: 7, role: 'user' } }));
+    });
+    expect(await screen.findByRole('button', { name: '万事广场' })).toBeVisible();
+
+    await act(async () => {
+      requests[0].resolve(jsonResponse({ error: 'Unauthorized' }, { status: 401 }));
+    });
+    expect(getToken()).toBe('current-token');
+    expect(screen.getByRole('button', { name: '万事广场' })).toBeVisible();
+  });
+
+  it('ignores a response that arrives after unmount even when fetch ignores abort', async () => {
+    const request = deferred();
+    setToken('preserved-token');
+    fetch.mockReturnValueOnce(request.promise);
+    const { unmount } = render(<App />);
+    const signal = fetch.mock.calls[0][1].signal;
+
+    unmount();
+    expect(signal.aborted).toBe(true);
+    await act(async () => {
+      request.resolve(jsonResponse({ error: 'Unauthorized' }, { status: 401 }));
+    });
+    expect(getToken()).toBe('preserved-token');
+  });
+
+  it('returns to login when any token-bearing business request gets a 401', async () => {
+    setToken('expired-token');
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ user: { id: 9, role: 'user' } }))
+      .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, { status: 401 }));
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: '万事广场' })).toBeVisible();
+    let requestError;
+    await act(async () => {
+      try {
+        await api('/api/requests');
+      } catch (error) {
+        requestError = error;
+      }
+    });
+    expect(requestError).toMatchObject({ status: 401 });
+
+    expect(await screen.findByRole('heading', { name: '登录番薯万事屋' })).toBeVisible();
+    expect(getToken()).toBeNull();
   });
 });

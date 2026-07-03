@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 
-export default function LoginPage({ onSubmit, error = '' }) {
+export default function LoginPage({
+  onSubmit,
+  onErrorClear = () => {},
+  error = '',
+}) {
   const [mode, setMode] = useState('login');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
@@ -9,10 +13,20 @@ export default function LoginPage({ onSubmit, error = '' }) {
   const [localError, setLocalError] = useState('');
   const isRegister = mode === 'register';
 
+  function clearErrors() {
+    setLocalError('');
+    onErrorClear();
+  }
+
   function switchMode(nextMode) {
     if (submitting) return;
     setMode(nextMode);
-    setLocalError('');
+    clearErrors();
+  }
+
+  function updateField(setter, value) {
+    clearErrors();
+    setter(value);
   }
 
   async function handleSubmit(event) {
@@ -46,10 +60,11 @@ export default function LoginPage({ onSubmit, error = '' }) {
         </h1>
         <p>把身份说明白，让每一次相遇更值得信任。</p>
 
-        <div className="auth-mode" aria-label="账号操作">
+        <div className="auth-mode" role="group" aria-label="账号操作">
           <button
             type="button"
             aria-pressed={!isRegister}
+            disabled={submitting}
             onClick={() => switchMode('login')}
           >
             登录
@@ -57,6 +72,7 @@ export default function LoginPage({ onSubmit, error = '' }) {
           <button
             type="button"
             aria-pressed={isRegister}
+            disabled={submitting}
             onClick={() => switchMode('register')}
           >
             注册
@@ -73,7 +89,9 @@ export default function LoginPage({ onSubmit, error = '' }) {
               autoComplete="username"
               required
               value={account}
-              onChange={(event) => setAccount(event.target.value)}
+              onChange={(event) =>
+                updateField(setAccount, event.target.value)
+              }
             />
           </label>
 
@@ -85,7 +103,9 @@ export default function LoginPage({ onSubmit, error = '' }) {
               autoComplete={isRegister ? 'new-password' : 'current-password'}
               required
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) =>
+                updateField(setPassword, event.target.value)
+              }
             />
           </label>
 
@@ -97,13 +117,19 @@ export default function LoginPage({ onSubmit, error = '' }) {
                 autoComplete="nickname"
                 required
                 value={nickname}
-                onChange={(event) => setNickname(event.target.value)}
+                onChange={(event) =>
+                  updateField(setNickname, event.target.value)
+                }
               />
             </label>
           )}
 
           <button type="submit" disabled={submitting}>
-            {submitting ? `${actionLabel}中…` : actionLabel}
+            {submitting ? (
+              <span role="status" aria-live="polite">
+                {actionLabel}中…
+              </span>
+            ) : actionLabel}
           </button>
         </form>
       </section>
