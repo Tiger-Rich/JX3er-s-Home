@@ -92,6 +92,9 @@ export default function FeedPage({ onSelectRequest }) {
                 发布者：{request.owner?.nickname || '未署名'}
                 {request.owner?.server ? ` · ${request.owner.server}` : ''}
                 {request.owner?.sect ? ` · ${request.owner.sect}` : ''}
+                {request.owner?.startedYear ? ` · ${request.owner.startedYear}年入坑` : ''}
+                {request.owner?.city ? ` · ${request.owner.city}` : ''}
+                {request.owner?.industry ? ` · ${request.owner.industry}` : ''}
                 {request.owner?.verificationStatus === 'approved' ? ' · 已确认身份' : ''}
               </p>
               <button type="button" onClick={() => onSelectRequest?.(request.id)}>

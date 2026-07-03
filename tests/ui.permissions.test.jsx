@@ -353,7 +353,12 @@ describe('user workflow pages', () => {
         owner: {
           nickname: '七秀同门',
           server: '梦江南',
+          gameNickname: '秀水灵心',
           sect: '七秀',
+          startedYear: 2013,
+          city: '苏州',
+          industry: '游戏研发',
+          occupation: '产品经理',
           verificationStatus: 'approved',
           contactValue: 'wx-secret-before-approval',
         },
@@ -371,9 +376,98 @@ describe('user workflow pages', () => {
 
     expect(await screen.findByRole('heading', { name: '聊聊产品转行' })).toBeVisible();
     expect(screen.getByText('七秀同门')).toBeVisible();
+    expect(screen.getByText('入坑年份：2013')).toBeVisible();
+    expect(screen.getByText('所在城市：苏州')).toBeVisible();
+    expect(screen.getByText('从事行业：游戏研发')).toBeVisible();
     expect(screen.queryByText(/secret-before-approval/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '返回万事广场' })).toBeVisible();
     expect(screen.queryByText('匿名')).not.toBeInTheDocument();
+  });
+
+  it('posts detail actions with their required bodies and calls the back handler', async () => {
+    const onBack = vi.fn();
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/requests/31' && !options.method) {
+        return Promise.resolve(jsonResponse({
+          request: {
+            id: 31,
+            type: 'job_referral',
+            title: '前端岗位内推',
+            description: '请先简单介绍经验。',
+            city: '杭州',
+            remote: false,
+            industry: '互联网',
+            budgetOrReward: null,
+            expiresAt: '2030-01-01T00:00:00.000Z',
+            owner: {
+              nickname: '万花同门',
+              server: '唯满侠',
+              gameNickname: '墨意',
+              sect: '万花',
+              startedYear: 2012,
+              city: '杭州',
+              industry: '互联网',
+              occupation: '工程师',
+              verificationStatus: 'approved',
+            },
+          },
+        }));
+      }
+      if (path === '/api/requests/31/applications') {
+        return Promise.resolve(jsonResponse({ application: { id: 1, status: 'pending' } }, { status: 201 }));
+      }
+      if (path === '/api/requests/31/favorite') {
+        return Promise.resolve(jsonResponse({ favorited: true }));
+      }
+      if (path === '/api/requests/31/report') {
+        return Promise.resolve(jsonResponse({ report: { id: 2, status: 'pending' } }, { status: 201 }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(
+      <RequestDetailPage
+        requestId={31}
+        session={{ verificationStatus: 'approved' }}
+        onBack={onBack}
+      />,
+    );
+
+    await screen.findByRole('heading', { name: '前端岗位内推' });
+    await user.click(screen.getByRole('button', { name: '返回万事广场' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+
+    await user.type(screen.getByLabelText('一句话联系申请'), '我有五年前端经验，想进一步聊聊。');
+    await user.click(screen.getByRole('button', { name: '递出联系申请' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/requests/31/applications',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ message: '我有五年前端经验，想进一步聊聊。' }),
+      }),
+    ));
+    expect(screen.getByRole('status')).toHaveTextContent('联系申请已递出，请等对方回应。');
+
+    await user.click(screen.getByRole('button', { name: '收藏委托' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/requests/31/favorite',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    expect(screen.getByRole('status')).toHaveTextContent('已收藏这份委托。');
+
+    await user.click(screen.getByRole('button', { name: '确认举报' }));
+    expect(fetch.mock.calls.some(([path]) => path === '/api/requests/31/report')).toBe(false);
+    expect(screen.getByLabelText('举报原因')).toBeInvalid();
+    await user.type(screen.getByLabelText('举报原因'), '内容疑似虚假，需要掌柜核查。');
+    await user.click(screen.getByRole('button', { name: '确认举报' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/requests/31/report',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ reason: '内容疑似虚假，需要掌柜核查。' }),
+      }),
+    ));
+    expect(screen.getByRole('status')).toHaveTextContent('举报已提交，掌柜会核查。');
   });
 
   it('shows publishing boundaries and disables unverified submission', () => {
@@ -385,6 +479,79 @@ describe('user workflow pages', () => {
     expect(screen.getByRole('button', { name: '发布委托' })).toBeDisabled();
     expect(screen.getByText('待掌柜审核')).toBeVisible();
     expect(screen.queryByText('匿名')).not.toBeInTheDocument();
+  });
+
+  it('validates required publishing fields and the city or remote rule', async () => {
+    const user = userEvent.setup();
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    await user.click(screen.getByRole('button', { name: '发布委托' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('请填写标题。');
+    expect(fetch).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText('标题'), '远程简历建议');
+    await user.click(screen.getByRole('button', { name: '发布委托' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('请填写委托说明。');
+    expect(fetch).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText('委托说明'), '希望找有招聘经验的朋友看看简历。');
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-01-02T10:30' } });
+    await user.click(screen.getByRole('button', { name: '发布委托' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('请填写城市，或选择可远程。');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('posts an approved remote request with a strict UTC expiry', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ request: { id: 41, status: 'pending' } }, { status: 201 }));
+    const user = userEvent.setup();
+    const localExpiry = '2030-01-02T10:30';
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    await user.selectOptions(screen.getByLabelText('类型'), 'industry_consulting');
+    await user.type(screen.getByLabelText('标题'), '远程行业咨询');
+    await user.type(screen.getByLabelText('委托说明'), '想了解游戏行业产品岗位。');
+    await user.click(screen.getByLabelText('可远程'));
+    await user.type(screen.getByLabelText('行业'), '游戏');
+    await user.type(screen.getByLabelText('预算或回报'), '一杯奶茶');
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: localExpiry } });
+    await user.click(screen.getByRole('button', { name: '发布委托' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/requests',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'industry_consulting',
+          title: '远程行业咨询',
+          description: '想了解游戏行业产品岗位。',
+          city: null,
+          remote: true,
+          industry: '游戏',
+          budgetOrReward: '一杯奶茶',
+          expiresAt: new Date(localExpiry).toISOString(),
+        }),
+      }),
+    ));
+    const requestBody = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(requestBody.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(screen.getByRole('status')).toHaveTextContent('委托已送交掌柜审核。');
+  });
+
+  it('allows an approved local request with a city and remote false', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ request: { id: 42, status: 'pending' } }, { status: 201 }));
+    const user = userEvent.setup();
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    await user.type(screen.getByLabelText('标题'), '杭州线下拍摄协助');
+    await user.type(screen.getByLabelText('委托说明'), '需要一位周末能到场的摄影同好。');
+    await user.type(screen.getByLabelText('城市'), '杭州');
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
+    await user.click(screen.getByRole('button', { name: '发布委托' }));
+
+    await waitFor(() => {
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      expect(body).toMatchObject({ city: '杭州', remote: false });
+    });
   });
 
   it('uses 我的名片 and requires server plus game nickname for verification', async () => {
@@ -401,6 +568,96 @@ describe('user workflow pages', () => {
     expect(await screen.findByLabelText('区服')).toBeRequired();
     expect(screen.getByLabelText('游戏 ID/昵称')).toBeRequired();
     expect(screen.getByText('我们不会索要游戏账号密码')).toBeVisible();
+  });
+
+  it('renders and submits every verification field using the backend response shape', async () => {
+    const onSessionRefresh = vi.fn().mockResolvedValue(undefined);
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/profile' && !options.method) {
+        return Promise.resolve(jsonResponse({
+          user: { nickname: '小七', city: '南京', contactValue: 'wx-old' },
+          profile: {
+            server: '梦江南', gameNickname: '秀秀', sect: '七秀', startedYear: 2016,
+            industry: '教育', occupation: '老师', canOffer: '课程建议', lookingFor: '同行交流',
+          },
+          verificationStatus: 'not_submitted',
+        }));
+      }
+      if (path === '/api/profile/verification') {
+        return Promise.resolve(jsonResponse({ profile: {}, verificationStatus: 'pending' }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<ProfilePage onSessionRefresh={onSessionRefresh} />);
+
+    const expectedValues = {
+      '昵称': '小七', '城市': '南京', '联系方式': 'wx-old', '区服': '梦江南',
+      '游戏 ID/昵称': '秀秀', '门派': '七秀', '入坑年份': 2016, '行业': '教育',
+      '职业': '老师', '我能提供': '课程建议', '我在寻找': '同行交流', '辅助认证材料': '',
+    };
+    for (const [label, value] of Object.entries(expectedValues)) {
+      expect(await screen.findByLabelText(label)).toHaveValue(value);
+    }
+
+    const nextValues = {
+      nickname: '小七新名片', city: '苏州', contactValue: 'wx-new', server: '唯满侠',
+      gameNickname: '秀水灵心', sect: '七秀', startedYear: '2018', industry: '游戏',
+      occupation: '策划', canOffer: '产品建议', lookingFor: '行业交流', supportMaterial: '角色截图说明',
+    };
+    for (const [name, value] of Object.entries(nextValues)) {
+      fireEvent.change(document.querySelector(`[name="${name}"]`), { target: { value } });
+    }
+    await user.click(screen.getByRole('button', { name: '提交身份认证' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/profile/verification',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ...nextValues, startedYear: 2018 }),
+      }),
+    ));
+    expect(onSessionRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status')).toHaveTextContent('认证资料已送交掌柜审核。');
+  });
+
+  it.each(['not_submitted', 'rejected'])('allows verification submission in %s status', async (verificationStatus) => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        user: { nickname: '小七', city: null, contactValue: null },
+        profile: { server: '', gameNickname: '' },
+        verificationStatus,
+      }))
+      .mockResolvedValueOnce(jsonResponse({ profile: {}, verificationStatus: 'pending' }));
+    const user = userEvent.setup();
+    render(<ProfilePage onSessionRefresh={vi.fn()} />);
+
+    expect(await screen.findByRole('button', { name: '提交身份认证' })).toBeEnabled();
+    expect(screen.getByLabelText('区服')).toBeRequired();
+    expect(screen.getByLabelText('游戏 ID/昵称')).toBeRequired();
+    await user.click(screen.getByRole('button', { name: '提交身份认证' }));
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await user.type(screen.getByLabelText('区服'), '梦江南');
+    await user.type(screen.getByLabelText('游戏 ID/昵称'), '秀秀');
+    await user.click(screen.getByRole('button', { name: '提交身份认证' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/profile/verification',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+  });
+
+  it.each(['pending', 'approved'])('keeps verification read-only in %s status', async (verificationStatus) => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      user: { nickname: '小七', city: '南京', contactValue: 'wx-safe' },
+      profile: { server: '梦江南', gameNickname: '秀秀' },
+      verificationStatus,
+    }));
+    render(<ProfilePage onSessionRefresh={vi.fn()} />);
+
+    expect(await screen.findByLabelText('区服')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('游戏 ID/昵称')).toHaveAttribute('readonly');
+    expect(screen.queryByRole('button', { name: '提交身份认证' })).not.toBeInTheDocument();
   });
 
   it('shows contact details only for approved applications and calls owner decisions', async () => {
@@ -479,7 +736,14 @@ describe('user workflow pages', () => {
     const requests = [
       { id: 1, type: 'other', title: '最新普通委托', createdAt: '2026-07-03T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: false, city: '杭州', owner: {} },
       { id: 2, type: 'job_referral', title: '较早内推', createdAt: '2026-07-01T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: true, city: null, owner: {} },
-      { id: 3, type: 'industry_consulting', title: '较新咨询', createdAt: '2026-07-02T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: true, city: '上海', owner: {} },
+      {
+        id: 3, type: 'industry_consulting', title: '较新咨询', createdAt: '2026-07-02T12:00:00.000Z',
+        expiresAt: '2030-01-01T00:00:00.000Z', remote: true, city: '上海', industry: '游戏',
+        owner: {
+          nickname: '万花同门', server: '唯满侠', sect: '万花', startedYear: 2011,
+          city: '成都', industry: '互联网', verificationStatus: 'approved',
+        },
+      },
     ];
     fetch.mockResolvedValue(jsonResponse({ requests }));
     render(<FeedPage onSelectRequest={() => {}} />);
@@ -490,12 +754,15 @@ describe('user workflow pages', () => {
       expect.stringContaining('较早内推'),
       expect.stringContaining('最新普通委托'),
     ]);
+    expect(screen.getByText(/发布者：万花同门.*唯满侠.*万花.*2011.*成都.*互联网.*已确认身份/)).toBeVisible();
 
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'industry_consulting' } });
     fireEvent.change(screen.getByLabelText('城市'), { target: { value: '上海 浦东' } });
     fireEvent.change(screen.getByLabelText('行业'), { target: { value: '游戏&互联网' } });
     fireEvent.change(screen.getByLabelText('远程方式'), { target: { value: 'true' } });
     await waitFor(() => {
       const lastUrl = fetch.mock.calls.at(-1)[0];
+      expect(lastUrl).toContain('type=industry_consulting');
       expect(lastUrl).toContain('city=%E4%B8%8A%E6%B5%B7+%E6%B5%A6%E4%B8%9C');
       expect(lastUrl).toContain('industry=%E6%B8%B8%E6%88%8F%26%E4%BA%92%E8%81%94%E7%BD%91');
       expect(lastUrl).toContain('remote=true');

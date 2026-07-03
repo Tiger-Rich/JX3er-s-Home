@@ -69,6 +69,9 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
             {state.request.owner?.server && <p>区服：{state.request.owner.server}</p>}
             {state.request.owner?.gameNickname && <p>游戏 ID/昵称：{state.request.owner.gameNickname}</p>}
             {state.request.owner?.sect && <p>门派：{state.request.owner.sect}</p>}
+            {state.request.owner?.startedYear && <p>入坑年份：{state.request.owner.startedYear}</p>}
+            {state.request.owner?.city && <p>所在城市：{state.request.owner.city}</p>}
+            {state.request.owner?.industry && <p>从事行业：{state.request.owner.industry}</p>}
             {state.request.owner?.verificationStatus === 'approved' && <p>已确认身份</p>}
           </section>
 
