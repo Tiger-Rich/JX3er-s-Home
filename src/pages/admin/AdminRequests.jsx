@@ -30,6 +30,16 @@ export default function AdminRequests({ onSummaryChange }) {
   const loadOwnerRef = useRef({ controller: null, version: 0 });
   const mutationOwnerRef = useRef({ controller: null, version: 0 });
 
+  const refreshPendingSummary = useCallback(async () => {
+    try {
+      const result = await api('/api/admin/requests?status=pending');
+      onSummaryChange?.((result.requests ?? []).length);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [onSummaryChange]);
+
   const load = useCallback(async (nextFilters = activeFiltersRef.current) => {
     const owner = loadOwnerRef.current;
     owner.controller?.abort();
@@ -104,8 +114,10 @@ export default function AdminRequests({ onSummaryChange }) {
         ...(action === 'approve' ? {} : { body: { reason } }),
       });
       if (!mountedRef.current || owner.version !== requestId) return;
-      const refreshed = await load();
+      const refreshed = await load(activeFiltersRef.current);
       if (!mountedRef.current || owner.version !== requestId || !refreshed) return;
+      await refreshPendingSummary();
+      if (!mountedRef.current || owner.version !== requestId) return;
       setFeedback('委托审核已更新');
       setReasons((current) => ({ ...current, [key]: '' }));
     } catch (mutationError) {

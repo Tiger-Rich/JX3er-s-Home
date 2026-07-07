@@ -596,12 +596,11 @@ describe('request, contact, and admin API', () => {
         user: expect.objectContaining({
           account: 'verification-pending',
           nickname: 'verification-pending',
-          contactValue: 'verification-pending-contact',
         }),
         profile: expect.objectContaining({ server: 'Dream River' }),
       }),
     );
-    expectNoKeys(list.body, ['passwordHash', 'openid']);
+    expectNoKeys(list.body, ['passwordHash', 'openid', 'contactValue']);
     expectNoKeys(publicRequests.body, ['contactValue']);
     expectNoKeys(reviewedRequests.body, ['contactValue']);
 
@@ -747,10 +746,15 @@ describe('request, contact, and admin API', () => {
     expect(invalid.status).toBe(400);
   });
 
-  it('lists safe filtered users and disables users without allowing admin self-lockout', async () => {
+  it('lists safe filtered users and disables users without allowing admin self-lockout or admin-on-admin disable', async () => {
     const targetId = insertUser({
       account: 'disable-target',
       nickname: 'Target Person',
+    });
+    const peerAdminId = insertUser({
+      account: 'peer-admin',
+      nickname: 'Peer Admin',
+      role: 'admin',
     });
     const list = await request(app)
       .get(
@@ -773,6 +777,9 @@ describe('request, contact, and admin API', () => {
     const self = await request(app)
       .post(`/api/admin/users/${users.admin}/disable`)
       .set(auth(users.admin));
+    const peerAdmin = await request(app)
+      .post(`/api/admin/users/${peerAdminId}/disable`)
+      .set(auth(users.admin));
     const disabled = await request(app)
       .post(`/api/admin/users/${targetId}/disable`)
       .set(auth(users.admin));
@@ -781,6 +788,10 @@ describe('request, contact, and admin API', () => {
       .set(auth(users.admin));
 
     expect(self.status).toBe(409);
+    expect(peerAdmin.status).toBe(409);
+    expect(
+      db.prepare('SELECT status FROM users WHERE id = ?').get(peerAdminId).status,
+    ).toBe('active');
     expect(disabled.body.user).toMatchObject({
       id: targetId,
       status: 'disabled',

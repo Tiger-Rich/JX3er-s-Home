@@ -82,7 +82,7 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
 
   async function disable(user) {
     const owner = mutationOwnerRef.current;
-    if (owner.controller || user.id === currentUser?.id || user.status !== 'active') return;
+    if (owner.controller || user.id === currentUser?.id || user.role === 'admin' || user.status !== 'active') return;
     const controller = new AbortController();
     const requestId = owner.version + 1;
     owner.version = requestId;
@@ -93,7 +93,7 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
     try {
       await api(`/api/admin/users/${user.id}/disable`, { method: 'POST', signal: controller.signal });
       if (!mountedRef.current || owner.version !== requestId) return;
-      const refreshed = await load();
+      const refreshed = await load(activeFiltersRef.current);
       if (!mountedRef.current || owner.version !== requestId || !refreshed) return;
       setFeedback('用户已禁用');
     } catch (mutationError) {
@@ -131,13 +131,22 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
           <tbody>
             {items.map((user) => {
               const isSelf = user.id === currentUser?.id;
+              const isAdmin = user.role === 'admin';
+              const isDisabled = user.status !== 'active';
+              const disableLabel = `禁用用户：${user.nickname || `用户 ${user.id}`}`;
               return (
                 <tr key={user.id}>
                   <td>{user.nickname || '—'}<br />城市：{user.city || '—'}<br />角色：{user.role === 'admin' ? '管理员' : '用户'}</td>
                   <td>区服：{user.server || '—'}<br />游戏昵称：{user.gameNickname || '—'}<br />门派：{user.sect || '—'}<br />入坑年份：{user.startedYear || '—'}</td>
                   <td>行业：{user.industry || '—'}<br />职业：{user.occupation || '—'}<br />可提供：{user.canOffer || '—'}<br />寻找：{user.lookingFor || '—'}</td>
                   <td><StatusBadge type="verification" status={user.verificationStatus} /><br />{user.status === 'active' ? '正常' : '已禁用'}</td>
-                  <td><button type="button" disabled={mutating || isSelf || user.status !== 'active'} aria-label={isSelf ? '不能禁用当前管理员' : user.status === 'active' ? '禁用用户' : '用户已禁用'} onClick={() => disable(user)}><UserX aria-hidden="true" size={18} />{isSelf ? '当前管理员' : user.status === 'active' ? '禁用' : '已禁用'}</button></td>
+                  <td>
+                    {isAdmin ? (
+                      isSelf ? '当前管理员' : '管理员账号'
+                    ) : (
+                      <button type="button" disabled={mutating || isDisabled} aria-label={isDisabled ? `${disableLabel}（已禁用）` : disableLabel} onClick={() => disable(user)}><UserX aria-hidden="true" size={18} />{isDisabled ? '已禁用' : '禁用'}</button>
+                    )}
+                  </td>
                 </tr>
               );
             })}

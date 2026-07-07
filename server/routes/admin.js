@@ -103,7 +103,6 @@ function verificationDto(row) {
       account: row.account,
       nickname: row.nickname,
       city: row.city,
-      contactValue: row.contactValue,
       role: row.role,
       status: row.userStatus,
     },
@@ -123,7 +122,7 @@ function verificationDto(row) {
 const VERIFICATION_QUERY = `
   SELECT v.id, v.userId, v.status, v.supportMaterial, v.reviewerId,
          v.reviewedAt, v.rejectReason, v.createdAt, v.updatedAt,
-         u.account, u.nickname, u.city, u.contactValue, u.role, u.status AS userStatus,
+         u.account, u.nickname, u.city, u.role, u.status AS userStatus,
          p.server, p.gameNickname, p.sect, p.startedYear, p.industry,
          p.occupation, p.canOffer, p.lookingFor
   FROM verifications v
@@ -364,6 +363,9 @@ export function createAdminRouter(db) {
         .prepare('SELECT id, nickname, city, role, status FROM users WHERE id = ?')
         .get(id);
       if (!existing) return res.status(404).json({ error: 'User not found' });
+      if (existing.role === 'admin') {
+        return res.status(409).json({ error: 'Administrators cannot disable other administrators' });
+      }
       const update = db
         .prepare(
           `UPDATE users SET status = 'disabled', updatedAt = CURRENT_TIMESTAMP

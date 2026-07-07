@@ -1144,7 +1144,6 @@ describe('admin review pages', () => {
       account: 'qixiu-admin-review',
       nickname: '七秀同门',
       city: '杭州',
-      contactValue: 'wx-qixiu',
       status: 'active',
     },
     profile: {
@@ -1216,10 +1215,12 @@ describe('admin review pages', () => {
     render(<AdminVerifications />);
 
     const verificationTable = await screen.findByRole('table', { name: '认证审核列表' });
-    for (const value of ['七秀同门', '杭州', 'wx-qixiu', '梦江南', '秀秀', '七秀', '2012', '互联网', '产品经理']) {
+    for (const value of ['七秀同门', '杭州', '梦江南', '秀秀', '七秀', '2012', '互联网', '产品经理']) {
       expect(verificationTable).toHaveTextContent(value);
     }
     expect(verificationTable).toHaveTextContent('账号：qixiu-admin-review');
+    expect(verificationTable).not.toHaveTextContent('wx-qixiu');
+    expect(verificationTable).not.toHaveTextContent('联系方式');
     expect(verificationTable).toHaveTextContent('工作证与游戏截图');
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/admin/verifications?status=pending', expect.any(Object));
     expect(screen.getByRole('button', { name: '拒绝认证' })).toBeDisabled();
@@ -1294,6 +1295,7 @@ describe('admin review pages', () => {
     fetch
       .mockResolvedValueOnce(jsonResponse({ requests: [reviewedRequest, approved] }))
       .mockResolvedValueOnce(jsonResponse({ request: reviewedRequest }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }))
       .mockResolvedValueOnce(jsonResponse({ requests: [] }));
     const user = userEvent.setup();
     render(<AdminRequests />);
@@ -1306,7 +1308,7 @@ describe('admin review pages', () => {
       method: 'POST',
       ...(body ? { body: JSON.stringify(body) } : {}),
     }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
   });
 
   it('uses all six user filters, hides sensitive fields, and prevents self-disable', async () => {
@@ -1317,8 +1319,8 @@ describe('admin review pages', () => {
     await screen.findByRole('table', { name: '安全用户列表' });
     for (const secret of ['must-not-render']) expect(screen.queryByText(secret)).not.toBeInTheDocument();
     expect(within(screen.getByLabelText('用户认证状态')).getByRole('option', { name: '未提交' })).toHaveValue('not_submitted');
-    expect(screen.getByRole('button', { name: '不能禁用当前管理员' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '禁用用户' })).toBeEnabled();
+    expect(screen.getByText('当前管理员')).toBeVisible();
+    expect(screen.getByRole('button', { name: '禁用用户：七秀同门' })).toBeEnabled();
     await user.type(screen.getByLabelText('用户昵称'), '七秀');
     await user.type(screen.getByLabelText('用户区服'), '梦江南');
     await user.type(screen.getByLabelText('用户城市'), '成都');
@@ -1338,12 +1340,21 @@ describe('admin review pages', () => {
     const user = userEvent.setup();
     render(<AdminUsers currentUser={{ id: 1, role: 'admin' }} />);
 
-    await user.click(await screen.findByRole('button', { name: '禁用用户' }));
+    await user.click(await screen.findByRole('button', { name: '禁用用户：七秀同门' }));
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/users/7/disable', expect.objectContaining({ method: 'POST' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('用户状态已变化，请刷新后重试');
   });
 
-  it('keeps all admin pages mounted so tab filters survive navigation', async () => {
+  it('hides the disable action for admin users and keeps it row-specific for members', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ users: adminUsers }));
+    render(<AdminUsers currentUser={{ id: 1, role: 'admin' }} />);
+
+    await screen.findByRole('table', { name: '安全用户列表' });
+    expect(screen.queryByRole('button', { name: '禁用用户：掌柜' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '禁用用户：七秀同门' })).toBeEnabled();
+  });
+
+  it('lazy-loads admin tabs and preserves visited tab state across navigation', async () => {
     fetch.mockImplementation((path) => {
       if (path.startsWith('/api/admin/verifications')) return Promise.resolve(jsonResponse({ verifications: [verification] }));
       if (path.startsWith('/api/admin/requests')) return Promise.resolve(jsonResponse({ requests: [reviewedRequest] }));
@@ -1354,13 +1365,59 @@ describe('admin review pages', () => {
     render(<AdminDashboard currentUser={{ id: 1, role: 'admin' }} onLogout={() => {}} />);
 
     expect(await screen.findByText('待审认证 1')).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/admin/verifications?status=pending', expect.any(Object));
     for (const tab of ['认证审核', '委托审核', '用户列表']) expect(screen.getByRole('button', { name: tab })).toBeVisible();
     expect(screen.queryByRole('button', { name: '待掌柜审核' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '委托审核' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await user.type(screen.getByLabelText('委托城市'), '苏州');
     await user.click(screen.getByRole('button', { name: '用户列表' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     await user.click(screen.getByRole('button', { name: '委托审核' }));
     expect(screen.getByLabelText('委托城市')).toHaveValue('苏州');
+  });
+
+  it('refreshes the pending request summary after a mutation even when a filter is active', async () => {
+    const onSummaryChange = vi.fn();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        requests: [
+          reviewedRequest,
+          { ...reviewedRequest, id: 42, title: '第二条待审单' },
+        ],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [reviewedRequest] }))
+      .mockResolvedValueOnce(jsonResponse({ request: { ...reviewedRequest, status: 'approved' } }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }))
+      .mockResolvedValueOnce(jsonResponse({
+        requests: [{ ...reviewedRequest, id: 42, title: '第二条待审单' }],
+      }));
+    const user = userEvent.setup();
+    render(<AdminRequests onSummaryChange={onSummaryChange} />);
+
+    await screen.findByRole('table', { name: '委托审核列表' });
+    expect(onSummaryChange).toHaveBeenLastCalledWith(2);
+    await user.type(screen.getByLabelText('委托城市'), '上海');
+    await user.click(screen.getByRole('button', { name: '筛选委托' }));
+    await waitFor(() => expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/admin/requests?city=%E4%B8%8A%E6%B5%B7',
+      expect.any(Object),
+    ));
+
+    await user.click(screen.getByRole('button', { name: '通过委托' }));
+    await waitFor(() => expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      '/api/admin/requests/41/approve',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    await waitFor(() => expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      '/api/admin/requests?status=pending',
+      expect.any(Object),
+    ));
+    expect(onSummaryChange).toHaveBeenLastCalledWith(1);
   });
 
   it('aborts an admin mutation on unmount and never starts the success refresh', async () => {
