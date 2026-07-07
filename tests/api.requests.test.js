@@ -594,6 +594,7 @@ describe('request, contact, and admin API', () => {
         status: 'pending',
         supportMaterial: 'private proof',
         user: expect.objectContaining({
+          account: 'verification-pending',
           nickname: 'verification-pending',
           contactValue: 'verification-pending-contact',
         }),

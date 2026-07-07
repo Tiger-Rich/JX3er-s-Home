@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, setToken, subscribeUnauthorized } from './api/client.js';
-import AdminShell from './components/AdminShell.jsx';
 import AppShell from './components/AppShell.jsx';
 import ContactPage from './pages/ContactPage.jsx';
 import CreateRequestPage from './pages/CreateRequestPage.jsx';
@@ -9,6 +8,7 @@ import FeedPage from './pages/FeedPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import RequestDetailPage from './pages/RequestDetailPage.jsx';
+import AdminDashboard from './pages/admin/AdminDashboard.jsx';
 
 export default function App() {
   const [session, setSession] = useState(undefined);
@@ -16,7 +16,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('feed');
   const [visitedTabs, setVisitedTabs] = useState(() => new Set(['feed']));
   const [selectedRequestId, setSelectedRequestId] = useState(null);
-  const [adminTab, setAdminTab] = useState('verifications');
   const mountedRef = useRef(false);
   const authenticationOwnerRef = useRef({ controller: null, version: 0 });
   const refreshOwnerRef = useRef({ controller: null, version: 0 });
@@ -153,13 +152,7 @@ export default function App() {
 
   if (session.user.role === 'admin') {
     return (
-      <AdminShell
-        activeTab={adminTab}
-        onTabChange={setAdminTab}
-        onLogout={handleLogout}
-      >
-        <div aria-live="polite" data-active-tab={adminTab} />
-      </AdminShell>
+      <AdminDashboard currentUser={session.user} onLogout={handleLogout} />
     );
   }
 

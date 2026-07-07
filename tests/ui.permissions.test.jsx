@@ -15,6 +15,10 @@ import FeedPage from '../src/pages/FeedPage.jsx';
 import LoginPage from '../src/pages/LoginPage.jsx';
 import ProfilePage from '../src/pages/ProfilePage.jsx';
 import RequestDetailPage from '../src/pages/RequestDetailPage.jsx';
+import AdminDashboard from '../src/pages/admin/AdminDashboard.jsx';
+import AdminRequests from '../src/pages/admin/AdminRequests.jsx';
+import AdminUsers from '../src/pages/admin/AdminUsers.jsx';
+import AdminVerifications from '../src/pages/admin/AdminVerifications.jsx';
 
 function jsonResponse(body, init = {}) {
   return new Response(JSON.stringify(body), {
@@ -1125,6 +1129,254 @@ describe('user workflow pages', () => {
     await user.click(screen.getByRole('button', { name: '我的名片' }));
     await user.click(screen.getByRole('button', { name: '发个委托' }));
     expect(screen.getByLabelText('标题')).toHaveValue('保留下来的委托草稿');
+  });
+});
+
+describe('admin review pages', () => {
+  const verification = {
+    id: 31,
+    userId: 7,
+    status: 'pending',
+    supportMaterial: '工作证与游戏截图',
+    rejectReason: null,
+    user: {
+      id: 7,
+      account: 'qixiu-admin-review',
+      nickname: '七秀同门',
+      city: '杭州',
+      contactValue: 'wx-qixiu',
+      status: 'active',
+    },
+    profile: {
+      server: '梦江南',
+      gameNickname: '秀秀',
+      sect: '七秀',
+      startedYear: 2012,
+      industry: '互联网',
+      occupation: '产品经理',
+    },
+  };
+  const reviewedRequest = {
+    id: 41,
+    ownerId: 7,
+    type: 'industry_consulting',
+    title: '行业咨询委托',
+    description: '想了解产品岗位。',
+    city: '上海',
+    remote: true,
+    industry: '互联网',
+    budgetOrReward: '一杯奶茶',
+    expiresAt: '2099-12-31T23:59:59.000Z',
+    status: 'pending',
+    rejectReason: null,
+    takedownReason: null,
+    owner: {
+      nickname: '七秀同门',
+      server: '梦江南',
+      gameNickname: '秀秀',
+      sect: '七秀',
+      startedYear: 2012,
+      city: '杭州',
+      industry: '互联网',
+      occupation: '产品经理',
+      verificationStatus: 'approved',
+    },
+  };
+  const adminUsers = [
+    {
+      id: 1, nickname: '掌柜', city: '杭州', role: 'admin', status: 'active',
+      verificationStatus: 'approved', server: '梦江南', gameNickname: '掌柜号',
+      sect: '万花', startedYear: 2009, industry: '社区', occupation: '管理员',
+      contactValue: 'must-not-render', passwordHash: 'must-not-render', openid: 'must-not-render',
+    },
+    {
+      id: 7, nickname: '七秀同门', city: '成都', role: 'user', status: 'active',
+      verificationStatus: 'approved', server: '梦江南', gameNickname: '秀秀',
+      sect: '七秀', startedYear: 2012, industry: '互联网', occupation: '产品经理',
+      canOffer: '行业经验', lookingFor: '同门交流',
+    },
+  ];
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('loads pending verification details and enforces approve/reject request contracts', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ verifications: [verification] }))
+      .mockResolvedValueOnce(jsonResponse({ verification: { ...verification, status: 'approved' } }))
+      .mockResolvedValueOnce(jsonResponse({ verifications: [] }));
+    const user = userEvent.setup();
+    render(<AdminVerifications />);
+
+    const verificationTable = await screen.findByRole('table', { name: '认证审核列表' });
+    for (const value of ['七秀同门', '杭州', 'wx-qixiu', '梦江南', '秀秀', '七秀', '2012', '互联网', '产品经理']) {
+      expect(verificationTable).toHaveTextContent(value);
+    }
+    expect(verificationTable).toHaveTextContent('账号：qixiu-admin-review');
+    expect(verificationTable).toHaveTextContent('工作证与游戏截图');
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/admin/verifications?status=pending', expect.any(Object));
+    expect(screen.getByRole('button', { name: '拒绝认证' })).toBeDisabled();
+    await user.type(screen.getByLabelText('认证拒绝理由'), '材料无法核验');
+    expect(screen.getByRole('button', { name: '拒绝认证' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: '通过认证' }));
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/verifications/7/approve', expect.objectContaining({
+      method: 'POST',
+    }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    expect(await screen.findByRole('status')).toHaveTextContent('认证审核已更新');
+  });
+
+  it('sends a trimmed verification rejection reason and reloads before unlocking', async () => {
+    const reload = deferred();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ verifications: [verification] }))
+      .mockResolvedValueOnce(jsonResponse({ verification: { ...verification, status: 'rejected' } }))
+      .mockReturnValueOnce(reload.promise);
+    const user = userEvent.setup();
+    render(<AdminVerifications />);
+
+    await screen.findByRole('table', { name: '认证审核列表' });
+    await user.type(screen.getByLabelText('认证拒绝理由'), '  材料不足  ');
+    await user.click(screen.getByRole('button', { name: '拒绝认证' }));
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/verifications/7/reject', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ reason: '材料不足' }),
+    }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole('button', { name: '拒绝认证' })).toBeDisabled();
+
+    await act(async () => reload.resolve(jsonResponse({ verifications: [] })));
+    expect(await screen.findByRole('status')).toHaveTextContent('认证审核已更新');
+  });
+
+  it('filters requests and supports approve, reject, and takedown reason gates', async () => {
+    const approved = { ...reviewedRequest, id: 42, title: '已发布委托', status: 'approved' };
+    fetch.mockImplementation(() => Promise.resolve(jsonResponse({ requests: [reviewedRequest, approved] })));
+    const user = userEvent.setup();
+    render(<AdminRequests />);
+
+    await screen.findByRole('table', { name: '委托审核列表' });
+    expect(screen.queryByText(/wx-|联系方式/)).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('委托状态')).getByRole('option', { name: '草稿' })).toHaveValue('draft');
+    await user.selectOptions(screen.getByLabelText('委托状态'), 'pending');
+    await user.selectOptions(screen.getByLabelText('委托类型'), 'industry_consulting');
+    await user.type(screen.getByLabelText('委托城市'), '上海 浦东');
+    await user.type(screen.getByLabelText('委托行业'), '游戏&互联网');
+    await user.selectOptions(screen.getByLabelText('是否过期'), 'false');
+    await user.click(screen.getByRole('button', { name: '筛选委托' }));
+    await waitFor(() => expect(fetch.mock.calls.at(-1)[0]).toBe(
+      '/api/admin/requests?status=pending&type=industry_consulting&city=%E4%B8%8A%E6%B5%B7+%E6%B5%A6%E4%B8%9C&industry=%E6%B8%B8%E6%88%8F%26%E4%BA%92%E8%81%94%E7%BD%91&expired=false',
+    ));
+
+    expect(screen.getByRole('button', { name: '拒绝委托' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下架委托' })).toBeDisabled();
+    await user.type(screen.getByLabelText('委托 41 拒绝理由'), '范围不合适');
+    await user.type(screen.getByLabelText('委托 42 下架理由'), '信息已失效');
+    expect(screen.getByRole('button', { name: '拒绝委托' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '下架委托' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '通过委托' })).toBeEnabled();
+  });
+
+  it.each([
+    ['通过委托', '/api/admin/requests/41/approve', undefined],
+    ['拒绝委托', '/api/admin/requests/41/reject', { reason: '范围不合适' }],
+    ['下架委托', '/api/admin/requests/42/takedown', { reason: '信息已失效' }],
+  ])('sends the %s mutation and refreshes the request list', async (buttonName, path, body) => {
+    const approved = { ...reviewedRequest, id: 42, title: '已发布委托', status: 'approved' };
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ requests: [reviewedRequest, approved] }))
+      .mockResolvedValueOnce(jsonResponse({ request: reviewedRequest }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }));
+    const user = userEvent.setup();
+    render(<AdminRequests />);
+
+    await screen.findByRole('table', { name: '委托审核列表' });
+    if (buttonName === '拒绝委托') await user.type(screen.getByLabelText('委托 41 拒绝理由'), body.reason);
+    if (buttonName === '下架委托') await user.type(screen.getByLabelText('委托 42 下架理由'), body.reason);
+    await user.click(screen.getByRole('button', { name: buttonName }));
+    expect(fetch).toHaveBeenNthCalledWith(2, path, expect.objectContaining({
+      method: 'POST',
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  });
+
+  it('uses all six user filters, hides sensitive fields, and prevents self-disable', async () => {
+    fetch.mockImplementation(() => Promise.resolve(jsonResponse({ users: adminUsers })));
+    const user = userEvent.setup();
+    render(<AdminUsers currentUser={{ id: 1, role: 'admin' }} />);
+
+    await screen.findByRole('table', { name: '安全用户列表' });
+    for (const secret of ['must-not-render']) expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('用户认证状态')).getByRole('option', { name: '未提交' })).toHaveValue('not_submitted');
+    expect(screen.getByRole('button', { name: '不能禁用当前管理员' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '禁用用户' })).toBeEnabled();
+    await user.type(screen.getByLabelText('用户昵称'), '七秀');
+    await user.type(screen.getByLabelText('用户区服'), '梦江南');
+    await user.type(screen.getByLabelText('用户城市'), '成都');
+    await user.type(screen.getByLabelText('用户行业'), '互联网');
+    await user.selectOptions(screen.getByLabelText('用户认证状态'), 'approved');
+    await user.selectOptions(screen.getByLabelText('用户状态'), 'active');
+    await user.click(screen.getByRole('button', { name: '筛选用户' }));
+    await waitFor(() => expect(fetch.mock.calls.at(-1)[0]).toBe(
+      '/api/admin/users?nickname=%E4%B8%83%E7%A7%80&server=%E6%A2%A6%E6%B1%9F%E5%8D%97&city=%E6%88%90%E9%83%BD&industry=%E4%BA%92%E8%81%94%E7%BD%91&verificationStatus=approved&status=active',
+    ));
+  });
+
+  it('disables another user and presents a friendly 409 conflict', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ users: adminUsers }))
+      .mockResolvedValueOnce(jsonResponse({ error: 'User is already disabled' }, { status: 409 }));
+    const user = userEvent.setup();
+    render(<AdminUsers currentUser={{ id: 1, role: 'admin' }} />);
+
+    await user.click(await screen.findByRole('button', { name: '禁用用户' }));
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/users/7/disable', expect.objectContaining({ method: 'POST' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('用户状态已变化，请刷新后重试');
+  });
+
+  it('keeps all admin pages mounted so tab filters survive navigation', async () => {
+    fetch.mockImplementation((path) => {
+      if (path.startsWith('/api/admin/verifications')) return Promise.resolve(jsonResponse({ verifications: [verification] }));
+      if (path.startsWith('/api/admin/requests')) return Promise.resolve(jsonResponse({ requests: [reviewedRequest] }));
+      if (path.startsWith('/api/admin/users')) return Promise.resolve(jsonResponse({ users: adminUsers }));
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<AdminDashboard currentUser={{ id: 1, role: 'admin' }} onLogout={() => {}} />);
+
+    expect(await screen.findByText('待审认证 1')).toBeVisible();
+    for (const tab of ['认证审核', '委托审核', '用户列表']) expect(screen.getByRole('button', { name: tab })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '待掌柜审核' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '委托审核' }));
+    await user.type(screen.getByLabelText('委托城市'), '苏州');
+    await user.click(screen.getByRole('button', { name: '用户列表' }));
+    await user.click(screen.getByRole('button', { name: '委托审核' }));
+    expect(screen.getByLabelText('委托城市')).toHaveValue('苏州');
+  });
+
+  it('aborts an admin mutation on unmount and never starts the success refresh', async () => {
+    const mutation = deferred();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ verifications: [verification] }))
+      .mockReturnValueOnce(mutation.promise);
+    const user = userEvent.setup();
+    const view = render(<AdminVerifications />);
+
+    await user.click(await screen.findByRole('button', { name: '通过认证' }));
+    const signal = fetch.mock.calls[1][1].signal;
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+    await act(async () => mutation.resolve(jsonResponse({ verification: { ...verification, status: 'approved' } })));
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
 

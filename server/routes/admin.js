@@ -100,6 +100,7 @@ function verificationDto(row) {
     updatedAt: row.updatedAt,
     user: {
       id: row.userId,
+      account: row.account,
       nickname: row.nickname,
       city: row.city,
       contactValue: row.contactValue,
@@ -122,7 +123,7 @@ function verificationDto(row) {
 const VERIFICATION_QUERY = `
   SELECT v.id, v.userId, v.status, v.supportMaterial, v.reviewerId,
          v.reviewedAt, v.rejectReason, v.createdAt, v.updatedAt,
-         u.nickname, u.city, u.contactValue, u.role, u.status AS userStatus,
+         u.account, u.nickname, u.city, u.contactValue, u.role, u.status AS userStatus,
          p.server, p.gameNickname, p.sect, p.startedYear, p.industry,
          p.occupation, p.canOffer, p.lookingFor
   FROM verifications v
