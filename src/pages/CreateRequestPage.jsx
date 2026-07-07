@@ -97,7 +97,7 @@ export default function CreateRequestPage({ session }) {
   return (
     <section className="page create-request-page" aria-labelledby="create-title">
       <h2 id="create-title">发个委托</h2>
-      <p>有事说清楚，合作才走得稳。</p>
+      <p className="page-intro">有事说清楚，合作才走得稳。</p>
       <p className="boundary-copy">万事屋不接账号交易、代练、外挂、私服相关委托，也不承诺求职或交易结果。</p>
       {!approved && <p role="status">{verificationLabels[session?.verificationStatus] || '请先完成身份认证'}</p>}
       <form onSubmit={submit} noValidate>
@@ -105,7 +105,7 @@ export default function CreateRequestPage({ session }) {
         <label>标题<input name="title" value={form.title} onChange={update} required maxLength={160} /></label>
         <label>委托说明<textarea name="description" value={form.description} onChange={update} required maxLength={4000} /></label>
         <label>城市<input name="city" value={form.city} onChange={update} maxLength={80} /></label>
-        <label><input name="remote" type="checkbox" checked={form.remote} onChange={update} />可远程</label>
+        <label className="checkbox-field"><input name="remote" type="checkbox" checked={form.remote} onChange={update} />可远程</label>
         <label>行业<input name="industry" value={form.industry} onChange={update} maxLength={120} /></label>
         <label>预算或回报<input name="budgetOrReward" value={form.budgetOrReward} onChange={update} maxLength={500} /></label>
         <label>有效期<input name="expiresAt" type="datetime-local" value={form.expiresAt} onChange={update} required /></label>

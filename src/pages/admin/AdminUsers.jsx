@@ -125,7 +125,8 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
       {error && <p role="alert">{error}</p>}
       {feedback && <p role="status">{feedback}</p>}
       {!loading && !error && (
-        <table>
+        <div className="table-scroll">
+          <table>
           <caption className="sr-only">安全用户列表</caption>
           <thead><tr><th>用户</th><th>游戏身份</th><th>职业与互助</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
@@ -152,7 +153,8 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
             })}
             {!items.length && <tr><td colSpan="5">没有符合条件的用户</td></tr>}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
     </section>
   );

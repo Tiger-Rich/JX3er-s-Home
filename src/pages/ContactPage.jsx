@@ -90,35 +90,39 @@ export default function ContactPage() {
   return (
     <section className="page contact-page" aria-labelledby="contact-title">
       <h2 id="contact-title">联系申请</h2>
-      <div role="group" aria-label="申请方向">
+      <div role="group" aria-label="申请方向" className="segmented-control">
         <button type="button" aria-pressed={direction === 'incoming'} onClick={() => setDirection('incoming')}>我收到</button>
         <button type="button" aria-pressed={direction === 'outgoing'} onClick={() => setDirection('outgoing')}>我递出</button>
       </div>
       {state.loading && <p role="status">正在查看往来消息…</p>}
       {!state.loading && state.error && <p role="alert">{state.error}</p>}
       {!state.loading && !state.error && applications.length === 0 && <p>这里暂时没有联系申请。</p>}
-      {!state.loading && !state.error && applications.map((application) => {
-        const otherNickname = direction === 'incoming' ? application.applicantNickname : application.ownerNickname;
-        return (
-          <article className="contact-card" key={application.id}>
-            <h3>{application.requestTitle}</h3>
-            <p>{direction === 'incoming' ? '申请人' : '发布者'}：{otherNickname}</p>
-            <p>{application.message}</p>
-            <StatusBadge type="application" status={application.status} />
-            {application.status === 'approved' && application.contactValue && <p>联系方式：{application.contactValue}</p>}
-            {direction === 'incoming' && application.status === 'pending' && (
-              <div>
-                <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'approve')}>
-                  <Check aria-hidden="true" size={18} />同意见面聊聊
-                </button>
-                <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'reject')}>
-                  <X aria-hidden="true" size={18} />暂不合适
-                </button>
-              </div>
-            )}
-          </article>
-        );
-      })}
+      {!state.loading && !state.error && (
+        <div className="contact-list">
+          {applications.map((application) => {
+            const otherNickname = direction === 'incoming' ? application.applicantNickname : application.ownerNickname;
+            return (
+              <article className="contact-card" key={application.id}>
+                <h3>{application.requestTitle}</h3>
+                <p>{direction === 'incoming' ? '申请人' : '发布者'}：{otherNickname}</p>
+                <p>{application.message}</p>
+                <StatusBadge type="application" status={application.status} />
+                {application.status === 'approved' && application.contactValue && <p>联系方式：{application.contactValue}</p>}
+                {direction === 'incoming' && application.status === 'pending' && (
+                  <div className="action-row">
+                    <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'approve')}>
+                      <Check aria-hidden="true" size={18} />同意见面聊聊
+                    </button>
+                    <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'reject')} className="button-danger">
+                      <X aria-hidden="true" size={18} />暂不合适
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
       {feedback && <p role={feedback.type === 'success' ? 'status' : 'alert'} aria-live="polite">{feedback.message}</p>}
     </section>
   );

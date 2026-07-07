@@ -8,6 +8,12 @@ function typeLabel(value) {
   return requestTypes.find((type) => type.value === value)?.label ?? '其他';
 }
 
+function renderLocation(request) {
+  if (request.remote && request.city) return `可远程，${request.city}`;
+  if (request.remote) return '可远程';
+  return request.city || '未注明';
+}
+
 export default function RequestDetailPage({ requestId, session, onBack }) {
   const [state, setState] = useState({ loading: true, error: '', request: null });
   const [message, setMessage] = useState('');
@@ -97,25 +103,44 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
   }
 
   return (
-    <section className="page request-detail-page" aria-labelledby="request-detail-title">
-      <button type="button" onClick={onBack}>
-        <ArrowLeft aria-hidden="true" size={18} />
-        返回万事广场
-      </button>
-      {state.loading && <p role="status">正在查看委托…</p>}
-      {!state.loading && state.error && <p role="alert">{state.error}</p>}
+    <section className="request-detail-page" aria-labelledby="request-detail-title">
+      <div className="request-detail-panel">
+        <button type="button" onClick={onBack} className="button-secondary">
+          <ArrowLeft aria-hidden="true" size={18} />
+          返回万事广场
+        </button>
+        {state.loading && <p role="status">正在查看委托…</p>}
+        {!state.loading && state.error && <p role="alert">{state.error}</p>}
+        {state.request && (
+          <>
+            <p className="eyebrow">{typeLabel(state.request.type)}</p>
+            <h2 id="request-detail-title">{state.request.title}</h2>
+            <p className="page-intro">{state.request.description}</p>
+            <dl className="detail-grid">
+              <div className="detail-item">
+                <dt>地点</dt>
+                <dd>{renderLocation(state.request)}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>行业</dt>
+                <dd>{state.request.industry || '未注明'}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>回报或预算</dt>
+                <dd>{state.request.budgetOrReward || '面议'}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>有效期</dt>
+                <dd>{new Date(state.request.expiresAt).toLocaleString('zh-CN')}</dd>
+              </div>
+            </dl>
+          </>
+        )}
+      </div>
+
       {state.request && (
         <>
-          <p>{typeLabel(state.request.type)}</p>
-          <h2 id="request-detail-title">{state.request.title}</h2>
-          <p>{state.request.description}</p>
-          <dl>
-            <dt>地点</dt><dd>{state.request.remote ? '可远程' : state.request.city || '未注明'}{state.request.remote && state.request.city ? `，${state.request.city}` : ''}</dd>
-            <dt>行业</dt><dd>{state.request.industry || '未注明'}</dd>
-            <dt>回报或预算</dt><dd>{state.request.budgetOrReward || '面议'}</dd>
-            <dt>有效期</dt><dd>{new Date(state.request.expiresAt).toLocaleString('zh-CN')}</dd>
-          </dl>
-          <section aria-labelledby="owner-title">
+          <section className="owner-card" aria-labelledby="owner-title">
             <h3 id="owner-title">发布者名片</h3>
             <p>{state.request.owner?.nickname || '未署名'}</p>
             {state.request.owner?.server && <p>区服：{state.request.owner.server}</p>}
@@ -127,36 +152,76 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
             {state.request.owner?.verificationStatus === 'approved' && <p>已确认身份</p>}
           </section>
 
-          {approved ? (
-            <form onSubmit={(event) => {
-              event.preventDefault();
-              runAction('application', `/api/requests/${requestId}/applications`, { message }, '联系申请已递出，请等对方回应。');
-            }}>
-              <label>一句话联系申请<input value={message} onChange={(event) => setMessage(event.target.value)} required maxLength={1000} /></label>
-              <button type="submit" disabled={Boolean(busyAction)}>
-                <Send aria-hidden="true" size={18} />递出联系申请
+          <section className="detail-card">
+            {approved ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  runAction(
+                    'application',
+                    `/api/requests/${requestId}/applications`,
+                    { message },
+                    '联系申请已递出，请等对方回应。',
+                  );
+                }}
+              >
+                <label>
+                  一句话联系申请
+                  <input
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                    required
+                    maxLength={1000}
+                  />
+                </label>
+                <button type="submit" disabled={Boolean(busyAction)}>
+                  <Send aria-hidden="true" size={18} />
+                  递出联系申请
+                </button>
+              </form>
+            ) : (
+              <p className="boundary-copy">完成身份认证后，才可递出联系申请或收藏委托。</p>
+            )}
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={!approved || Boolean(busyAction)}
+              onClick={() =>
+                runAction('favorite', `/api/requests/${requestId}/favorite`, null, '已收藏这份委托。')
+              }
+            >
+              <Bookmark aria-hidden="true" size={18} />
+              收藏委托
+            </button>
+          </section>
+
+          <section className="detail-card">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                runAction('report', `/api/requests/${requestId}/report`, { reason }, '举报已提交，掌柜会核查。');
+              }}
+            >
+              <label>
+                举报原因
+                <textarea
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  required
+                  maxLength={500}
+                />
+              </label>
+              <button type="submit" disabled={Boolean(busyAction)} className="button-danger">
+                <Flag aria-hidden="true" size={18} />
+                确认举报
               </button>
             </form>
-          ) : <p>完成身份认证后，才可递出联系申请或收藏委托。</p>}
-
-          <button
-            type="button"
-            disabled={!approved || Boolean(busyAction)}
-            onClick={() => runAction('favorite', `/api/requests/${requestId}/favorite`, null, '已收藏这份委托。')}
-          >
-            <Bookmark aria-hidden="true" size={18} />收藏委托
-          </button>
-
-          <form onSubmit={(event) => {
-            event.preventDefault();
-            runAction('report', `/api/requests/${requestId}/report`, { reason }, '举报已提交，掌柜会核查。');
-          }}>
-            <label>举报原因<textarea value={reason} onChange={(event) => setReason(event.target.value)} required maxLength={500} /></label>
-            <button type="submit" disabled={Boolean(busyAction)}>
-              <Flag aria-hidden="true" size={18} />确认举报
-            </button>
-          </form>
-          {feedback && <p role={feedback.type === 'success' ? 'status' : 'alert'} aria-live="polite">{feedback.message}</p>}
+            {feedback && (
+              <p role={feedback.type === 'success' ? 'status' : 'alert'} aria-live="polite">
+                {feedback.message}
+              </p>
+            )}
+          </section>
         </>
       )}
     </section>

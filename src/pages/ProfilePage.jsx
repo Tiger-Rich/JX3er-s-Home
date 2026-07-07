@@ -143,7 +143,7 @@ export default function ProfilePage({ onSessionRefresh }) {
           {state.verificationStatus === 'rejected' && state.rejectReason && (
             <p>认证未通过原因：{state.rejectReason}</p>
           )}
-          <p>我们不会索要游戏账号密码</p>
+          <p className="boundary-copy">我们不会索要游戏账号密码</p>
           <form onSubmit={submit}>
             <label>昵称<input name="nickname" value={form.nickname} onChange={update} readOnly={readOnly} required maxLength={40} /></label>
             <label>城市<input name="city" value={form.city} onChange={update} readOnly={readOnly} maxLength={40} /></label>

@@ -50,6 +50,7 @@ export default function FeedPage({ onSelectRequest }) {
   return (
     <section className="page feed-page" aria-labelledby="feed-title">
       <h2 id="feed-title">万事广场</h2>
+      <p className="page-intro">看清来路与需求，再决定要不要开口接话。</p>
       <div className="filter-bar" aria-label="委托筛选">
         <label>
           类型
@@ -97,7 +98,7 @@ export default function FeedPage({ onSelectRequest }) {
                 {request.owner?.industry ? ` · ${request.owner.industry}` : ''}
                 {request.owner?.verificationStatus === 'approved' ? ' · 已确认身份' : ''}
               </p>
-              <button type="button" onClick={() => onSelectRequest?.(request.id)}>
+              <button type="button" onClick={() => onSelectRequest?.(request.id)} className="button-secondary">
                 <Eye aria-hidden="true" size={18} />查看委托：{request.title}
               </button>
             </article>

@@ -161,7 +161,8 @@ export default function AdminRequests({ onSummaryChange }) {
       {error && <p role="alert">{error}</p>}
       {feedback && <p role="status">{feedback}</p>}
       {!loading && !error && (
-        <table>
+        <div className="table-scroll">
+          <table>
           <caption className="sr-only">委托审核列表</caption>
           <thead><tr><th>委托</th><th>范围与回报</th><th>发布者公开身份</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
@@ -184,7 +185,8 @@ export default function AdminRequests({ onSummaryChange }) {
             })}
             {!items.length && <tr><td colSpan="5">没有符合条件的委托</td></tr>}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
     </section>
   );

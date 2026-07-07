@@ -20,7 +20,7 @@ export default function AdminShell({
           <h1>番薯万事屋</h1>
           <p>同在江湖，先看身份，再谈合作。</p>
         </div>
-        <button type="button" onClick={onLogout}>
+        <button type="button" onClick={onLogout} className="button-secondary">
           <LogOut aria-hidden="true" size={18} />
           <span>退出登录</span>
         </button>

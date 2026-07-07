@@ -120,7 +120,8 @@ export default function AdminVerifications({ onSummaryChange }) {
       {error && <p role="alert">{error}</p>}
       {feedback && <p role="status">{feedback}</p>}
       {(!loading || items.length > 0) && !error && (
-        <table>
+        <div className="table-scroll">
+          <table>
           <caption className="sr-only">认证审核列表</caption>
           <thead><tr><th>身份</th><th>游戏资料</th><th>职业资料</th><th>认证材料</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
@@ -149,7 +150,8 @@ export default function AdminVerifications({ onSummaryChange }) {
             })}
             {!items.length && <tr><td colSpan="6">没有符合条件的认证资料</td></tr>}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
     </section>
   );
