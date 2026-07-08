@@ -387,7 +387,8 @@ textarea[readonly] {
   color: var(--text-soft);
 }
 
-.bottom-navigation button[aria-current="page"] {
+.bottom-navigation button[aria-current="page"],
+.bottom-navigation button[aria-current="page"]:hover:not(:disabled) {
   background: var(--accent-soft);
   border-color: rgba(143, 90, 60, 0.18);
   color: var(--accent-strong);
@@ -557,7 +558,8 @@ textarea[readonly] {
   margin-bottom: 16px;
 }
 
-.admin-navigation button[aria-current="page"] {
+.admin-navigation button[aria-current="page"],
+.admin-navigation button[aria-current="page"]:hover:not(:disabled) {
   border-color: rgba(143, 90, 60, 0.22);
   background: var(--accent-soft);
   color: var(--accent-strong);
