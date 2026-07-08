@@ -113,7 +113,7 @@ export default function AdminVerifications({ onSummaryChange }) {
               <option value="rejected">已拒绝</option>
             </select>
           </label>
-          <button type="submit"><Search aria-hidden="true" size={18} />筛选认证</button>
+          <button type="submit" className="button-primary"><Search aria-hidden="true" size={18} />筛选认证</button>
         </form>
       </div>
       {loading && <p role="status">正在加载认证资料…</p>}
@@ -121,7 +121,7 @@ export default function AdminVerifications({ onSummaryChange }) {
       {feedback && <p role="status">{feedback}</p>}
       {(!loading || items.length > 0) && !error && (
         <div className="table-scroll">
-          <table>
+          <table className="admin-table admin-table-verifications">
           <caption className="sr-only">认证审核列表</caption>
           <thead><tr><th>身份</th><th>游戏资料</th><th>职业资料</th><th>认证材料</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
@@ -139,9 +139,9 @@ export default function AdminVerifications({ onSummaryChange }) {
                   <td>
                     {item.status === 'pending' ? (
                       <div className="admin-actions">
-                        <button type="button" disabled={mutating} onClick={() => review(item, 'approve')}><Check aria-hidden="true" size={18} />通过认证</button>
+                        <button type="button" disabled={mutating} className="button-primary" onClick={() => review(item, 'approve')}><Check aria-hidden="true" size={18} />通过认证</button>
                         <label>认证拒绝理由<textarea value={reason} onChange={(event) => setReasons((current) => ({ ...current, [item.userId]: event.target.value }))} /></label>
-                        <button type="button" disabled={mutating || !reason.trim()} onClick={() => review(item, 'reject')}><X aria-hidden="true" size={18} />拒绝认证</button>
+                        <button type="button" disabled={mutating || !reason.trim()} className="button-danger" onClick={() => review(item, 'reject')}><X aria-hidden="true" size={18} />拒绝认证</button>
                       </div>
                     ) : '无需操作'}
                   </td>

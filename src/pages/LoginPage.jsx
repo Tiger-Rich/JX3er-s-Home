@@ -124,7 +124,7 @@ export default function LoginPage({
             </label>
           )}
 
-          <button type="submit" disabled={submitting}>
+          <button type="submit" disabled={submitting} className="button-primary">
             {submitting ? (
               <span role="status" aria-live="polite">
                 {actionLabel}中…

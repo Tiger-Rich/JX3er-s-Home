@@ -137,7 +137,7 @@ export default function AdminRequests({ onSummaryChange }) {
     return (
       <>
         <label>{`委托 ${item.id} ${label}理由`}<textarea value={reason} onChange={(event) => setReasons((current) => ({ ...current, [key]: event.target.value }))} /></label>
-        <button type="button" disabled={mutating || !reason.trim()} onClick={() => transition(item, action)}>
+        <button type="button" disabled={mutating || !reason.trim()} className="button-danger" onClick={() => transition(item, action)}>
           {action === 'reject' ? <X aria-hidden="true" size={18} /> : <ShieldX aria-hidden="true" size={18} />}{action === 'reject' ? '拒绝委托' : '下架委托'}
         </button>
       </>
@@ -154,7 +154,7 @@ export default function AdminRequests({ onSummaryChange }) {
           <label>委托城市<input name="city" value={filters.city} onChange={updateFilter} /></label>
           <label>委托行业<input name="industry" value={filters.industry} onChange={updateFilter} /></label>
           <label>是否过期<select name="expired" value={filters.expired} onChange={updateFilter}><option value="">全部</option><option value="false">未过期</option><option value="true">已过期</option></select></label>
-          <button type="submit"><Search aria-hidden="true" size={18} />筛选委托</button>
+          <button type="submit" className="button-primary"><Search aria-hidden="true" size={18} />筛选委托</button>
         </form>
       </div>
       {loading && <p role="status">正在加载委托…</p>}
@@ -162,7 +162,7 @@ export default function AdminRequests({ onSummaryChange }) {
       {feedback && <p role="status">{feedback}</p>}
       {!loading && !error && (
         <div className="table-scroll">
-          <table>
+          <table className="admin-table admin-table-requests">
           <caption className="sr-only">委托审核列表</caption>
           <thead><tr><th>委托</th><th>范围与回报</th><th>发布者公开身份</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
@@ -176,7 +176,7 @@ export default function AdminRequests({ onSummaryChange }) {
                   <td>{owner.nickname || '—'}<br />区服：{owner.server || '—'}<br />游戏昵称：{owner.gameNickname || '—'}<br />门派：{owner.sect || '—'}<br />入坑年份：{owner.startedYear || '—'}<br />城市：{owner.city || '—'}<br />行业：{owner.industry || '—'}<br />职业：{owner.occupation || '—'}<br /><StatusBadge type="verification" status={owner.verificationStatus} /></td>
                   <td><StatusBadge type="request" status={item.status} />{item.rejectReason && <><br />拒绝理由：{item.rejectReason}</>}{item.takedownReason && <><br />下架理由：{item.takedownReason}</>}</td>
                   <td><div className="admin-actions">
-                    {item.status === 'pending' && <><button type="button" disabled={mutating} onClick={() => transition(item, 'approve')}><Check aria-hidden="true" size={18} />通过委托</button>{reasonControl(item, 'reject', '拒绝')}</>}
+                    {item.status === 'pending' && <><button type="button" disabled={mutating} className="button-primary" onClick={() => transition(item, 'approve')}><Check aria-hidden="true" size={18} />通过委托</button>{reasonControl(item, 'reject', '拒绝')}</>}
                     {item.status === 'approved' && reasonControl(item, 'takedown', '下架')}
                     {!['pending', 'approved'].includes(item.status) && '无需操作'}
                   </div></td>

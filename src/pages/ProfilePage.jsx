@@ -158,7 +158,7 @@ export default function ProfilePage({ onSessionRefresh }) {
             <label>我在寻找<textarea name="lookingFor" value={form.lookingFor} onChange={update} readOnly={readOnly} maxLength={500} /></label>
             <label>辅助认证材料<textarea name="supportMaterial" value={form.supportMaterial} onChange={update} readOnly={readOnly} maxLength={500} /></label>
             {canSubmit && (
-              <button type="submit" disabled={submitting}>
+              <button type="submit" disabled={submitting} className="button-primary">
                 <Send aria-hidden="true" size={18} />提交身份认证
               </button>
             )}

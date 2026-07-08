@@ -174,7 +174,7 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
                     maxLength={1000}
                   />
                 </label>
-                <button type="submit" disabled={Boolean(busyAction)}>
+                <button type="submit" disabled={Boolean(busyAction)} className="button-primary">
                   <Send aria-hidden="true" size={18} />
                   递出联系申请
                 </button>

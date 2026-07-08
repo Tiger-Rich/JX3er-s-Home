@@ -110,7 +110,7 @@ export default function ContactPage() {
                 {application.status === 'approved' && application.contactValue && <p>联系方式：{application.contactValue}</p>}
                 {direction === 'incoming' && application.status === 'pending' && (
                   <div className="action-row">
-                    <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'approve')}>
+                    <button type="button" disabled={busyId !== null} className="button-primary" onClick={() => decide(application.id, 'approve')}>
                       <Check aria-hidden="true" size={18} />同意见面聊聊
                     </button>
                     <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'reject')} className="button-danger">

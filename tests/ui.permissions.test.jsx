@@ -88,6 +88,27 @@ describe('application shells', () => {
     rerender(<StatusBadge status="unexpected" type="application" />);
     expect(screen.getByText('状态未知')).toBeVisible();
   });
+  it('applies explicit secondary button classes to shell navigation and logout actions', () => {
+    const { container, rerender } = render(
+      <AppShell activeTab="feed" onTabChange={() => {}} onLogout={() => {}}>
+        <p>shell body</p>
+      </AppShell>,
+    );
+
+    for (const button of container.querySelectorAll('.app-header button, .bottom-navigation button')) {
+      expect(button).toHaveClass('button-secondary');
+    }
+
+    rerender(
+      <AdminShell activeTab="verifications" onTabChange={() => {}} onLogout={() => {}}>
+        <p>admin body</p>
+      </AdminShell>,
+    );
+
+    for (const button of container.querySelectorAll('.admin-header button, .admin-navigation button')) {
+      expect(button).toHaveClass('button-secondary');
+    }
+  });
 });
 
 describe('LoginPage', () => {
@@ -582,6 +603,12 @@ describe('user workflow pages', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('marks the create-request submit action as an explicit primary button', () => {
+    const { container } = render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    expect(container.querySelector('button[type="submit"]')).toHaveClass('button-primary');
+  });
+
   it('posts an approved remote request with a strict UTC expiry', async () => {
     fetch.mockResolvedValueOnce(jsonResponse({ request: { id: 41, status: 'pending' } }, { status: 201 }));
     const user = userEvent.setup();
@@ -704,6 +731,19 @@ describe('user workflow pages', () => {
     expect(await screen.findByLabelText('区服')).toBeRequired();
     expect(screen.getByLabelText('游戏 ID/昵称')).toBeRequired();
     expect(screen.getByText('我们不会索要游戏账号密码')).toBeVisible();
+  });
+
+  it('marks the verification submit action as an explicit primary button', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      user: {},
+      profile: {},
+      verificationStatus: 'not_submitted',
+      verification: { status: 'not_submitted' },
+    }));
+    const { container } = render(<ProfilePage onSessionRefresh={vi.fn()} />);
+
+    await screen.findByRole('heading');
+    expect(container.querySelector('button[type="submit"]')).toHaveClass('button-primary');
   });
 
   it('renders and submits every verification field using the backend response shape', async () => {
@@ -1286,6 +1326,20 @@ describe('admin review pages', () => {
     expect(screen.getByRole('button', { name: '通过委托' })).toBeEnabled();
   });
 
+  it('uses page-specific admin table classes and explicit action button variants', async () => {
+    const approved = { ...reviewedRequest, id: 42, status: 'approved' };
+    fetch.mockImplementation(() => Promise.resolve(jsonResponse({ requests: [reviewedRequest, approved] })));
+    const { container } = render(<AdminRequests />);
+
+    await waitFor(() => expect(container.querySelector('table')).not.toBeNull());
+    expect(container.querySelector('table')).toHaveClass('admin-table', 'admin-table-requests');
+    expect(container.querySelector('.admin-filters button[type="submit"]')).toHaveClass('button-primary');
+    expect(container.querySelector('.admin-actions button')).toHaveClass('button-primary');
+
+    const actionButtons = [...container.querySelectorAll('.admin-actions button')];
+    expect(actionButtons.filter((button) => button.classList.contains('button-danger'))).toHaveLength(2);
+  });
+
   it.each([
     ['通过委托', '/api/admin/requests/41/approve', undefined],
     ['拒绝委托', '/api/admin/requests/41/reject', { reason: '范围不合适' }],
@@ -1352,6 +1406,25 @@ describe('admin review pages', () => {
     await screen.findByRole('table', { name: '安全用户列表' });
     expect(screen.queryByRole('button', { name: '禁用用户：掌柜' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '禁用用户：七秀同门' })).toBeEnabled();
+  });
+
+  it('uses page-specific classes for verification and user review tables', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ verifications: [verification] }))
+      .mockResolvedValueOnce(jsonResponse({ users: adminUsers }));
+    const { container, rerender } = render(<AdminVerifications />);
+
+    await waitFor(() => expect(container.querySelector('table')).not.toBeNull());
+    expect(container.querySelector('table')).toHaveClass('admin-table', 'admin-table-verifications');
+    expect(container.querySelector('.admin-filters button[type="submit"]')).toHaveClass('button-primary');
+    expect(container.querySelector('.admin-actions button')).toHaveClass('button-primary');
+    expect(container.querySelectorAll('.admin-actions button')[1]).toHaveClass('button-danger');
+
+    rerender(<AdminUsers currentUser={{ id: 1, role: 'admin' }} />);
+    await waitFor(() => expect(container.querySelector('table')).not.toBeNull());
+    expect(container.querySelector('table')).toHaveClass('admin-table', 'admin-table-users');
+    expect(container.querySelector('.admin-filters button[type="submit"]')).toHaveClass('button-primary');
+    expect(container.querySelector('tbody button')).toHaveClass('button-danger');
   });
 
   it('lazy-loads admin tabs and preserves visited tab state across navigation', async () => {

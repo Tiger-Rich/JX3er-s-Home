@@ -118,7 +118,7 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
           <label>用户行业<input name="industry" value={filters.industry} onChange={updateFilter} /></label>
           <label>用户认证状态<select name="verificationStatus" value={filters.verificationStatus} onChange={updateFilter}><option value="">全部</option><option value="not_submitted">未提交</option><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已拒绝</option></select></label>
           <label>用户状态<select name="status" value={filters.status} onChange={updateFilter}><option value="">全部</option><option value="active">正常</option><option value="disabled">已禁用</option></select></label>
-          <button type="submit"><Search aria-hidden="true" size={18} />筛选用户</button>
+          <button type="submit" className="button-primary"><Search aria-hidden="true" size={18} />筛选用户</button>
         </form>
       </div>
       {loading && <p role="status">正在加载用户…</p>}
@@ -126,7 +126,7 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
       {feedback && <p role="status">{feedback}</p>}
       {!loading && !error && (
         <div className="table-scroll">
-          <table>
+          <table className="admin-table admin-table-users">
           <caption className="sr-only">安全用户列表</caption>
           <thead><tr><th>用户</th><th>游戏身份</th><th>职业与互助</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
@@ -145,7 +145,7 @@ export default function AdminUsers({ currentUser, onSummaryChange }) {
                     {isAdmin ? (
                       isSelf ? '当前管理员' : '管理员账号'
                     ) : (
-                      <button type="button" disabled={mutating || isDisabled} aria-label={isDisabled ? `${disableLabel}（已禁用）` : disableLabel} onClick={() => disable(user)}><UserX aria-hidden="true" size={18} />{isDisabled ? '已禁用' : '禁用'}</button>
+                      <button type="button" disabled={mutating || isDisabled} className="button-danger" aria-label={isDisabled ? `${disableLabel}（已禁用）` : disableLabel} onClick={() => disable(user)}><UserX aria-hidden="true" size={18} />{isDisabled ? '已禁用' : '禁用'}</button>
                     )}
                   </td>
                 </tr>

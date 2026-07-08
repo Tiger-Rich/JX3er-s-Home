@@ -31,6 +31,7 @@ export default function AdminShell({
           <button
             key={id}
             type="button"
+            className="button-secondary"
             aria-current={activeTab === id ? 'page' : undefined}
             onClick={() => onTabChange(id)}
           >

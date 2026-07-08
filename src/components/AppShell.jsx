@@ -40,6 +40,7 @@ export default function AppShell({
           <button
             key={id}
             type="button"
+            className="button-secondary"
             aria-current={activeTab === id ? 'page' : undefined}
             onClick={() => onTabChange(id)}
           >

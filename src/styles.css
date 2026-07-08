@@ -58,6 +58,13 @@ textarea {
 
 button {
   cursor: pointer;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font-weight: 600;
 }
 
 button:disabled {
@@ -170,7 +177,6 @@ main[role="status"] {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid transparent;
   border-radius: 8px;
   transition:
     background-color 0.18s ease,
@@ -241,42 +247,48 @@ textarea[readonly] {
   color: var(--text-soft);
 }
 
-button,
-.button-primary {
-  min-height: 44px;
-  padding: 10px 14px;
+.button-primary,
+.button-secondary,
+.button-danger {
   background: var(--accent);
   color: #fffaf5;
   font-weight: 700;
 }
 
-button:hover:not(:disabled),
+.button-primary {
+  border-color: rgba(143, 90, 60, 0.2);
+}
+
 .button-primary:hover:not(:disabled) {
   background: var(--accent-strong);
 }
 
-button:disabled,
-.button-primary:disabled {
+.button-primary:disabled,
+.button-secondary:disabled,
+.button-danger:disabled {
   opacity: 0.62;
 }
 
-.button-secondary,
-.request-card button,
-.request-detail-panel > button,
-.admin-navigation button,
-.bottom-navigation button,
-.app-header button,
-.admin-header button,
-.admin-actions .button-secondary {
+.button-secondary {
   background: var(--surface-strong);
   border-color: var(--border);
   color: var(--text);
+}
+
+.button-secondary:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--border-strong);
 }
 
 .button-danger {
   background: var(--danger-soft);
   border-color: rgba(160, 67, 56, 0.2);
   color: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  background: #f5d8d1;
+  border-color: rgba(160, 67, 56, 0.32);
 }
 
 .feedback,
@@ -520,11 +532,6 @@ button:disabled,
   width: 100%;
 }
 
-.owner-card {
-  display: grid;
-  gap: 8px;
-}
-
 .detail-card,
 .owner-card {
   display: grid;
@@ -611,6 +618,18 @@ table {
   background: rgba(255, 253, 249, 0.86);
   border-radius: 8px;
   overflow: hidden;
+}
+
+.admin-table-verifications {
+  min-width: 1200px;
+}
+
+.admin-table-requests {
+  min-width: 1120px;
+}
+
+.admin-table-users {
+  min-width: 1040px;
 }
 
 th,

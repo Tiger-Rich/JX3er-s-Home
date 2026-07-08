@@ -109,7 +109,7 @@ export default function CreateRequestPage({ session }) {
         <label>行业<input name="industry" value={form.industry} onChange={update} maxLength={120} /></label>
         <label>预算或回报<input name="budgetOrReward" value={form.budgetOrReward} onChange={update} maxLength={500} /></label>
         <label>有效期<input name="expiresAt" type="datetime-local" value={form.expiresAt} onChange={update} required /></label>
-        <button type="submit" disabled={!approved || submitting}>
+        <button type="submit" disabled={!approved || submitting} className="button-primary">
           <Send aria-hidden="true" size={18} />发布委托
         </button>
       </form>
