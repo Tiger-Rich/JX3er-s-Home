@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../server/app.js';
 import { issueToken } from '../server/auth.js';
 import { createDatabase } from '../server/db.js';
-import { startServer } from '../server/index.js';
+import { readServerOptionsFromEnv, startServer } from '../server/index.js';
 
 function expectNoPasswordHash(value) {
   expect(JSON.stringify(value)).not.toContain('passwordHash');
@@ -894,6 +894,15 @@ describe('server startup', () => {
       delete process.env.FANSHU_DB_RESET;
       rmSync(tempDirectory, { recursive: true, force: true });
     }
+  });
+
+  it('rejects invalid environment ports with a clear error', () => {
+    expect(() => readServerOptionsFromEnv({ FANSHU_PORT: 'abc' })).toThrow(
+      'Invalid FANSHU_PORT: abc',
+    );
+    expect(() => readServerOptionsFromEnv({ FANSHU_PORT: '70000' })).toThrow(
+      'Invalid FANSHU_PORT: 70000',
+    );
   });
 
   it('closes the database when the requested port is already in use', async () => {

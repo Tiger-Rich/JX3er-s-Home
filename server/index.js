@@ -9,11 +9,20 @@ function shouldResetDatabase(reset) {
   return reset === true || reset === '1' || reset === 'true';
 }
 
+function readPort(port) {
+  if (!port) return undefined;
+  const parsedPort = Number(port);
+  if (!Number.isInteger(parsedPort) || parsedPort <= 0 || parsedPort > 65535) {
+    throw new Error(`Invalid FANSHU_PORT: ${port}`);
+  }
+  return parsedPort;
+}
+
 export function readServerOptionsFromEnv(env = process.env) {
   return {
     filename: env.FANSHU_DB_FILENAME,
     host: env.FANSHU_HOST,
-    port: env.FANSHU_PORT ? Number(env.FANSHU_PORT) : undefined,
+    port: readPort(env.FANSHU_PORT),
     resetDatabase: shouldResetDatabase(env.FANSHU_DB_RESET),
   };
 }

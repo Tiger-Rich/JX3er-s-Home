@@ -5,8 +5,8 @@ import { defineConfig } from '@playwright/test';
 
 const e2eDirectory = join(process.cwd(), '.superpowers', 'playwright');
 const e2eDatabasePath = join(e2eDirectory, `fanshu-e2e-${Date.now()}.db`);
-const e2eApiPort = 38474;
-const e2eWebPort = 38473;
+const e2eApiPort = 8787;
+const e2eWebPort = 5173;
 
 mkdirSync(e2eDirectory, { recursive: true });
 
@@ -24,7 +24,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'node server/index.js',
+      command: 'npm run api',
       env: webServerEnv({
         FANSHU_DB_FILENAME: e2eDatabasePath,
         FANSHU_DB_RESET: '1',
@@ -35,12 +35,12 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: `npm run dev -- --host 127.0.0.1 --port ${e2eWebPort}`,
+      command: 'npm run dev -- --host 127.0.0.1',
       env: webServerEnv({
         FANSHU_API_ORIGIN: `http://127.0.0.1:${e2eApiPort}`,
       }),
       url: `http://127.0.0.1:${e2eWebPort}`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
     },
   ],
 });
