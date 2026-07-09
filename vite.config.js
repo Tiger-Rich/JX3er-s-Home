@@ -6,6 +6,7 @@ const apiOrigin = process.env.FANSHU_API_ORIGIN ?? 'http://127.0.0.1:8787';
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': apiOrigin,

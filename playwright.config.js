@@ -35,7 +35,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: 'npm run dev -- --host 127.0.0.1',
+      command: 'npm run dev',
       env: webServerEnv({
         FANSHU_API_ORIGIN: `http://127.0.0.1:${e2eApiPort}`,
       }),
