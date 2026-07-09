@@ -313,7 +313,7 @@ textarea[readonly] {
   width: min(100%, 480px);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 16px 16px calc(108px + env(safe-area-inset-bottom));
+  padding: 16px 16px calc(132px + env(safe-area-inset-bottom));
 }
 
 .app-header,

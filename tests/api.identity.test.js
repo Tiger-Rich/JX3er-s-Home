@@ -849,6 +849,53 @@ describe('server startup', () => {
     }
   });
 
+  it('reads the database filename and reset flag from the environment', async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), 'fanshu-api-env-'));
+    const databasePath = join(tempDirectory, 'env-test.db');
+    process.env.FANSHU_DB_FILENAME = databasePath;
+    process.env.FANSHU_DB_RESET = '1';
+
+    try {
+      const dirtyDatabase = createDatabase(databasePath);
+      dirtyDatabase
+        .prepare(
+          "INSERT INTO users (account, passwordHash, nickname, role) VALUES ('leftover', 'password:test', 'Leftover', 'user')",
+        )
+        .run();
+      dirtyDatabase.close();
+
+      const server = startServer({ host: '127.0.0.1', port: 0 });
+
+      try {
+        if (!server.listening) await once(server, 'listening');
+
+        const health = await request(server).get('/api/health');
+        expect(health.status).toBe(200);
+
+        const db = createDatabase(databasePath);
+        try {
+          const accounts = db
+            .prepare('SELECT account FROM users ORDER BY account')
+            .all()
+            .map(({ account }) => account);
+          expect(accounts).toEqual(['admin', 'qixiu', 'wanhua']);
+        } finally {
+          db.close();
+        }
+      } finally {
+        if (server.listening) {
+          await new Promise((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+          });
+        }
+      }
+    } finally {
+      delete process.env.FANSHU_DB_FILENAME;
+      delete process.env.FANSHU_DB_RESET;
+      rmSync(tempDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('closes the database when the requested port is already in use', async () => {
     const blocker = createServer();
     blocker.listen(0, '127.0.0.1');

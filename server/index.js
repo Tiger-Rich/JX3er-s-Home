@@ -1,14 +1,36 @@
-import { join } from 'node:path';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { createApp } from './app.js';
 import { createDatabase, seedDatabase } from './db.js';
 
+function shouldResetDatabase(reset) {
+  return reset === true || reset === '1' || reset === 'true';
+}
+
+export function readServerOptionsFromEnv(env = process.env) {
+  return {
+    filename: env.FANSHU_DB_FILENAME,
+    host: env.FANSHU_HOST,
+    port: env.FANSHU_PORT ? Number(env.FANSHU_PORT) : undefined,
+    resetDatabase: shouldResetDatabase(env.FANSHU_DB_RESET),
+  };
+}
+
 export function startServer({
-  filename = join(process.cwd(), 'fanshu.db'),
-  host = '127.0.0.1',
-  port = 8787,
+  filename = readServerOptionsFromEnv().filename ?? join(process.cwd(), 'fanshu.db'),
+  host = readServerOptionsFromEnv().host ?? '127.0.0.1',
+  port = readServerOptionsFromEnv().port ?? 8787,
+  resetDatabase = readServerOptionsFromEnv().resetDatabase,
 } = {}) {
+  if (filename !== ':memory:') {
+    mkdirSync(dirname(filename), { recursive: true });
+    if (resetDatabase && existsSync(filename)) {
+      rmSync(filename);
+    }
+  }
+
   const db = createDatabase(filename);
   try {
     seedDatabase(db);
