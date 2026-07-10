@@ -116,6 +116,9 @@ export function createProfileRouter(db) {
       const currentVerification = db
         .prepare('SELECT supportMaterial FROM verifications WHERE userId = ?')
         .get(req.user.id);
+      const nextContactValue = Object.hasOwn(body, 'contactValue')
+        ? requiredText(body.contactValue, 'contactValue', 160)
+        : currentUser.contactValue;
       const values = {
         server: requiredText(body.server, 'server', 80),
         gameNickname: requiredText(
@@ -127,12 +130,7 @@ export function createProfileRouter(db) {
           ? requiredText(body.nickname, 'nickname', 40)
           : currentUser.nickname,
         city: optionalText(body, 'city', currentUser.city, 40),
-        contactValue: optionalText(
-          body,
-          'contactValue',
-          currentUser.contactValue,
-          160,
-        ),
+        contactValue: nextContactValue,
         sect: optionalText(body, 'sect', currentProfile.sect, 40),
         startedYear: optionalStartedYear(body, currentProfile.startedYear),
         industry: optionalText(
@@ -166,6 +164,9 @@ export function createProfileRouter(db) {
           500,
         ),
       };
+      if (!values.contactValue) {
+        throw clientError(400, 'contactValue is required');
+      }
 
       const submitVerification = db.transaction(() => {
         const verificationUpdate = db.prepare(

@@ -147,7 +147,7 @@ export default function ProfilePage({ onSessionRefresh }) {
           <form onSubmit={submit}>
             <label>昵称<input name="nickname" value={form.nickname} onChange={update} readOnly={readOnly} required maxLength={40} /></label>
             <label>城市<input name="city" value={form.city} onChange={update} readOnly={readOnly} maxLength={40} /></label>
-            <label>联系方式<input name="contactValue" value={form.contactValue} onChange={update} readOnly={readOnly} maxLength={160} /></label>
+            <label>联系方式<input name="contactValue" value={form.contactValue} onChange={update} readOnly={readOnly} required maxLength={160} /></label>
             <label>区服<input name="server" value={form.server} onChange={update} readOnly={readOnly} required maxLength={80} /></label>
             <label>游戏 ID/昵称<input name="gameNickname" value={form.gameNickname} onChange={update} readOnly={readOnly} required maxLength={80} /></label>
             <label>门派<input name="sect" value={form.sect} onChange={update} readOnly={readOnly} maxLength={40} /></label>

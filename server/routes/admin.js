@@ -93,6 +93,7 @@ function verificationDto(row) {
     userId: row.userId,
     status: row.status,
     supportMaterial: row.supportMaterial,
+    contactValue: row.contactValue,
     reviewerId: row.reviewerId,
     reviewedAt: row.reviewedAt,
     rejectReason: row.rejectReason,
@@ -122,7 +123,8 @@ function verificationDto(row) {
 const VERIFICATION_QUERY = `
   SELECT v.id, v.userId, v.status, v.supportMaterial, v.reviewerId,
          v.reviewedAt, v.rejectReason, v.createdAt, v.updatedAt,
-         u.account, u.nickname, u.city, u.role, u.status AS userStatus,
+         u.account, u.nickname, u.city, u.contactValue, u.role,
+         u.status AS userStatus,
          p.server, p.gameNickname, p.sect, p.startedYear, p.industry,
          p.occupation, p.canOffer, p.lookingFor
   FROM verifications v

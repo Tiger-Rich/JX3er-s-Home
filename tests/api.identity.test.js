@@ -81,7 +81,7 @@ describe('identity API', () => {
     const response = await register();
 
     expect(response.status).toBe(201);
-    expect(response.body.token).toMatch(/^prototype:\d+$/);
+    expect(response.body.token).toMatch(/^prototype:\d+:[0-9a-f]{64}$/);
     expect(response.body.user).toMatchObject({
       account: 'new-user',
       nickname: 'New User',
@@ -181,7 +181,7 @@ describe('identity API', () => {
       .send({ account: 'new-user', password: 'secret123' });
 
     expect(response.status).toBe(200);
-    expect(response.body.token).toMatch(/^prototype:\d+$/);
+    expect(response.body.token).toMatch(/^prototype:\d+:[0-9a-f]{64}$/);
     expect(response.body.user).toMatchObject({
       account: 'new-user',
       nickname: 'New User',
@@ -229,6 +229,7 @@ describe('identity API', () => {
     ['a missing header', undefined],
     ['an unrelated scheme', 'Basic abc'],
     ['an empty token', 'Bearer '],
+    ['an old unsigned token', 'Bearer prototype:1'],
     ['an undefined ID', 'Bearer prototype:undefined'],
     ['a null ID', 'Bearer prototype:null'],
     ['a zero ID', 'Bearer prototype:0'],
@@ -240,6 +241,18 @@ describe('identity API', () => {
     if (authorization !== undefined) call.set('Authorization', authorization);
 
     const response = await call;
+
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects a tampered signed token on protected user routes', async () => {
+    const registration = await register();
+    const [prefix, userId, signature] = registration.body.token.split(':');
+    const tamperedSignature = `${signature.slice(0, -1)}${signature.endsWith('0') ? '1' : '0'}`;
+
+    const response = await request(app)
+      .get('/api/profile')
+      .set('Authorization', `Bearer ${prefix}:${userId}:${tamperedSignature}`);
 
     expect(response.status).toBe(401);
   });
@@ -364,7 +377,11 @@ describe('identity API', () => {
     const submission = await request(app)
       .post('/api/profile/verification')
       .set('Authorization', authorization)
-      .send({ server: 'Dream River', gameNickname: 'Sword Heart' });
+      .send({
+        contactValue: 'profile-contact',
+        server: 'Dream River',
+        gameNickname: 'Sword Heart',
+      });
     expect(Object.keys(submission.body.profile).sort()).toEqual(
       ['nickname', 'city', 'contactValue', ...expectedProfileFields].sort(),
     );
@@ -373,6 +390,8 @@ describe('identity API', () => {
   it.each([
     ['server', undefined],
     ['server', '   '],
+    ['contactValue', undefined],
+    ['contactValue', '   '],
     ['gameNickname', undefined],
     ['gameNickname', '   '],
   ])(
@@ -416,6 +435,7 @@ describe('identity API', () => {
       .post('/api/profile/verification')
       .set('Authorization', `Bearer ${registration.body.token}`)
       .send({
+        contactValue: 'contact-me',
         server: 'Dream River',
         gameNickname: 'Sword Heart',
         nickname: 'Unchanged Name',
@@ -447,6 +467,7 @@ describe('identity API', () => {
       .post('/api/profile/verification')
       .set('Authorization', `Bearer ${registration.body.token}`)
       .send({
+        contactValue: 'contact-me',
         server: 'Dream River',
         gameNickname: 'Sword Heart',
         startedYear,
@@ -481,6 +502,7 @@ describe('identity API', () => {
       .post('/api/profile/verification')
       .set('Authorization', `Bearer ${registration.body.token}`)
       .send({
+        contactValue: 'contact-me',
         server: 'Dream River',
         gameNickname: 'Sword Heart',
         [field]: 'x'.repeat(maxLength + 1),
@@ -726,6 +748,7 @@ describe('identity API', () => {
       .send({
         server: 'Dream River',
         gameNickname: 'Sword Heart',
+        contactValue: 'resubmitted-contact',
         supportMaterial: 'new material',
       });
 

@@ -593,6 +593,7 @@ describe('request, contact, and admin API', () => {
         userId: pendingId,
         status: 'pending',
         supportMaterial: 'private proof',
+        contactValue: 'verification-pending-contact',
         user: expect.objectContaining({
           account: 'verification-pending',
           nickname: 'verification-pending',
@@ -600,7 +601,7 @@ describe('request, contact, and admin API', () => {
         profile: expect.objectContaining({ server: 'Dream River' }),
       }),
     );
-    expectNoKeys(list.body, ['passwordHash', 'openid', 'contactValue']);
+    expectNoKeys(list.body, ['passwordHash', 'openid']);
     expectNoKeys(publicRequests.body, ['contactValue']);
     expectNoKeys(reviewedRequests.body, ['contactValue']);
 
@@ -626,6 +627,22 @@ describe('request, contact, and admin API', () => {
       rejectReason: 'Insufficient proof',
     });
     expect(repeated.status).toBe(409);
+  });
+
+  it('rejects unsigned and tampered prototype tokens on admin verification routes', async () => {
+    const signedToken = issueToken(users.admin);
+    const [prefix, userId, signature] = signedToken.split(':');
+    const tamperedSignature = `${signature.slice(0, -1)}${signature.endsWith('0') ? '1' : '0'}`;
+
+    const unsigned = await request(app)
+      .get('/api/admin/verifications?status=pending')
+      .set('Authorization', 'Bearer prototype:1');
+    const tampered = await request(app)
+      .get('/api/admin/verifications?status=pending')
+      .set('Authorization', `Bearer ${prefix}:${userId}:${tamperedSignature}`);
+
+    expect(unsigned.status).toBe(401);
+    expect(tampered.status).toBe(401);
   });
 
   it('allows only active admins to review requests with conditional transitions', async () => {

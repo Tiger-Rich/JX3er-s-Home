@@ -1,4 +1,7 @@
-const TOKEN_PATTERN = /^Bearer prototype:([1-9]\d*)$/;
+import crypto from 'node:crypto';
+
+const TOKEN_PATTERN = /^Bearer prototype:([1-9]\d*):([0-9a-f]{64})$/;
+const DEFAULT_PROTOTYPE_TOKEN_SECRET = 'fanshu-local-mvp-prototype-secret';
 
 function isValidUserId(userId) {
   return Number.isSafeInteger(userId) && userId > 0;
@@ -12,11 +15,22 @@ export function verifyPassword(password, hash) {
   return typeof password === 'string' && hash === hashPassword(password);
 }
 
+function tokenSecret() {
+  return process.env.FANSHU_PROTOTYPE_TOKEN_SECRET || DEFAULT_PROTOTYPE_TOKEN_SECRET;
+}
+
+function tokenSignature(userId) {
+  return crypto
+    .createHmac('sha256', tokenSecret())
+    .update(String(userId))
+    .digest('hex');
+}
+
 export function issueToken(userId) {
   if (!isValidUserId(userId)) {
     throw new TypeError('userId must be a positive integer');
   }
-  return `prototype:${userId}`;
+  return `prototype:${userId}:${tokenSignature(userId)}`;
 }
 
 export function parseToken(header) {
@@ -26,7 +40,21 @@ export function parseToken(header) {
   if (!match) return null;
 
   const userId = Number(match[1]);
-  return isValidUserId(userId) ? userId : null;
+  if (!isValidUserId(userId)) return null;
+
+  const expectedSignature = tokenSignature(userId);
+  const receivedSignature = match[2];
+  const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+  const receivedBuffer = Buffer.from(receivedSignature, 'hex');
+
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
+    return null;
+  }
+
+  return userId;
 }
 
 export function loadCurrentUser(db, userId) {

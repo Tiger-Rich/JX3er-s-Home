@@ -131,7 +131,7 @@ export default function AdminVerifications({ onSummaryChange }) {
               const reason = reasons[item.userId] ?? '';
               return (
                 <tr key={item.id ?? item.userId}>
-                  <td>{user.nickname || '—'}<br />账号：{user.account || '—'}<br />城市：{user.city || '—'}</td>
+                  <td>{user.nickname || '—'}<br />账号：{user.account || '—'}<br />城市：{user.city || '—'}<br />联系方式：{item.contactValue || '—'}</td>
                   <td>区服：{profile.server || '—'}<br />游戏昵称：{profile.gameNickname || '—'}<br />门派：{profile.sect || '—'}<br />入坑年份：{profile.startedYear || '—'}</td>
                   <td>行业：{profile.industry || '—'}<br />职业：{profile.occupation || '—'}</td>
                   <td>{item.supportMaterial || '—'}</td>

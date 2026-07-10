@@ -729,6 +729,7 @@ describe('user workflow pages', () => {
     expect(await screen.findByRole('heading', { name: '我的名片' })).toBeVisible();
     expect(screen.queryByText('我的番薯名片')).not.toBeInTheDocument();
     expect(await screen.findByLabelText('区服')).toBeRequired();
+    expect(screen.getByLabelText('联系方式')).toBeRequired();
     expect(screen.getByLabelText('游戏 ID/昵称')).toBeRequired();
     expect(screen.getByText('我们不会索要游戏账号密码')).toBeVisible();
   });
@@ -855,7 +856,7 @@ describe('user workflow pages', () => {
     const onSessionRefresh = vi.fn();
     fetch
       .mockResolvedValueOnce(jsonResponse({
-        user: { nickname: '小七', city: null, contactValue: null },
+        user: { nickname: '小七', city: null, contactValue: 'wx-old' },
         profile: { server: '梦江南', gameNickname: '秀秀' },
         verificationStatus: 'not_submitted',
         verification: { status: 'not_submitted', supportMaterial: null, rejectReason: null },
@@ -879,7 +880,7 @@ describe('user workflow pages', () => {
   it('announces profile submission failures as alerts', async () => {
     fetch
       .mockResolvedValueOnce(jsonResponse({
-        user: { nickname: '小七', city: null, contactValue: null },
+        user: { nickname: '小七', city: null, contactValue: 'wx-old' },
         profile: { server: '梦江南', gameNickname: '秀秀' },
         verificationStatus: 'not_submitted',
       }))
@@ -905,11 +906,13 @@ describe('user workflow pages', () => {
 
     expect(await screen.findByRole('button', { name: '提交身份认证' })).toBeEnabled();
     expect(screen.getByLabelText('区服')).toBeRequired();
+    expect(screen.getByLabelText('联系方式')).toBeRequired();
     expect(screen.getByLabelText('游戏 ID/昵称')).toBeRequired();
     await user.click(screen.getByRole('button', { name: '提交身份认证' }));
     expect(fetch).toHaveBeenCalledTimes(1);
 
     await user.type(screen.getByLabelText('区服'), '梦江南');
+    await user.type(screen.getByLabelText('联系方式'), 'wx-contact');
     await user.type(screen.getByLabelText('游戏 ID/昵称'), '秀秀');
     await user.click(screen.getByRole('button', { name: '提交身份认证' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
@@ -1175,6 +1178,7 @@ describe('user workflow pages', () => {
 describe('admin review pages', () => {
   const verification = {
     id: 31,
+    contactValue: 'wx-qixiu',
     userId: 7,
     status: 'pending',
     supportMaterial: '工作证与游戏截图',
@@ -1259,8 +1263,7 @@ describe('admin review pages', () => {
       expect(verificationTable).toHaveTextContent(value);
     }
     expect(verificationTable).toHaveTextContent('账号：qixiu-admin-review');
-    expect(verificationTable).not.toHaveTextContent('wx-qixiu');
-    expect(verificationTable).not.toHaveTextContent('联系方式');
+    expect(verificationTable).toHaveTextContent('联系方式：wx-qixiu');
     expect(verificationTable).toHaveTextContent('工作证与游戏截图');
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/admin/verifications?status=pending', expect.any(Object));
     expect(screen.getByRole('button', { name: '拒绝认证' })).toBeDisabled();
