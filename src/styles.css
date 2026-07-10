@@ -446,6 +446,16 @@ textarea[readonly] {
   background: rgba(246, 234, 214, 0.58);
 }
 
+.attention-copy {
+  color: var(--danger);
+}
+
+.required-mark {
+  margin-left: 4px;
+  color: var(--danger);
+  font-weight: 800;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;

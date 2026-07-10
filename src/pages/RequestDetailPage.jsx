@@ -171,7 +171,7 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
                 }}
               >
                 <label>
-                  一句话联系申请
+                  联系申请-给ta一个和你交换联系方式的理由
                   <input
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
@@ -185,7 +185,7 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
                 </button>
               </form>
             ) : (
-              <p className="boundary-copy">完成身份认证后，才可递出联系申请或收藏委托。</p>
+              <p className="boundary-copy attention-copy">点击我的名片，完成身份认证后，才可递出联系申请或收藏委托。</p>
             )}
             <button
               type="button"

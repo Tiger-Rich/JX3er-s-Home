@@ -445,7 +445,7 @@ describe('user workflow pages', () => {
 
     expect(await screen.findByRole('heading', { name: '自己的行业咨询委托' })).toBeVisible();
     expect(screen.getByText('这是你发布的委托，其他番薯递出联系申请后会在联系申请里出现。')).toBeVisible();
-    expect(screen.queryByLabelText('一句话联系申请')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('联系申请-给ta一个和你交换联系方式的理由')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '递出联系申请' })).not.toBeInTheDocument();
   });
 
@@ -502,7 +502,7 @@ describe('user workflow pages', () => {
     await user.click(screen.getByRole('button', { name: '返回万事广场' }));
     expect(onBack).toHaveBeenCalledTimes(1);
 
-    await user.type(screen.getByLabelText('一句话联系申请'), '我有五年前端经验，想进一步聊聊。');
+    await user.type(screen.getByLabelText('联系申请-给ta一个和你交换联系方式的理由'), '我有五年前端经验，想进一步聊聊。');
     await user.click(screen.getByRole('button', { name: '递出联系申请' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       '/api/requests/31/applications',
@@ -553,7 +553,7 @@ describe('user workflow pages', () => {
     render(<RequestDetailPage requestId={32} session={{ verificationStatus: 'approved' }} onBack={() => {}} />);
 
     await screen.findByRole('heading', { name: '并发保护委托' });
-    await user.type(screen.getByLabelText('一句话联系申请'), '我想进一步了解。');
+    await user.type(screen.getByLabelText('联系申请-给ta一个和你交换联系方式的理由'), '我想进一步了解。');
     await user.type(screen.getByLabelText('举报原因'), '备用举报内容');
     await user.click(screen.getByRole('button', { name: '递出联系申请' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
@@ -583,7 +583,7 @@ describe('user workflow pages', () => {
     const view = render(<RequestDetailPage requestId={33} session={{ verificationStatus: 'approved' }} onBack={() => {}} />);
 
     await screen.findByRole('heading', { name: '卸载保护委托' });
-    await user.type(screen.getByLabelText('一句话联系申请'), '卸载前申请');
+    await user.type(screen.getByLabelText('联系申请-给ta一个和你交换联系方式的理由'), '卸载前申请');
     await user.click(screen.getByRole('button', { name: '递出联系申请' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     const mutationSignal = fetch.mock.calls[1][1].signal;
@@ -619,7 +619,8 @@ describe('user workflow pages', () => {
       '万事屋不接账号交易、代练、外挂、私服相关委托，也不承诺求职或交易结果。',
     )).toBeVisible();
     expect(screen.getByRole('button', { name: '发布委托' })).toBeDisabled();
-    expect(screen.getByText('待掌柜审核')).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent('请点击我的名片提交认证');
+    expect(screen.getByRole('status')).toHaveClass('attention-copy');
     expect(screen.queryByText('匿名')).not.toBeInTheDocument();
   });
 
@@ -771,6 +772,9 @@ describe('user workflow pages', () => {
     expect(await screen.findByLabelText('区服')).toBeRequired();
     expect(screen.getByLabelText('联系方式')).toBeRequired();
     expect(screen.getByLabelText('游戏 ID/昵称')).toBeRequired();
+    expect(screen.getByText('联系方式').querySelector('.required-mark')).toHaveTextContent('*');
+    expect(screen.getByText('区服').querySelector('.required-mark')).toHaveTextContent('*');
+    expect(screen.getByText('游戏 ID/昵称').querySelector('.required-mark')).toHaveTextContent('*');
     expect(screen.getByText('我们不会索要游戏账号密码')).toBeVisible();
   });
 
@@ -811,7 +815,7 @@ describe('user workflow pages', () => {
     const expectedValues = {
       '昵称': '小七', '城市': '南京', '联系方式': 'wx-old', '区服': '梦江南',
       '游戏 ID/昵称': '秀秀', '门派': '七秀', '入坑年份': 2016, '行业': '教育',
-      '职业': '老师', '我能提供': '课程建议', '我在寻找': '同行交流', '辅助认证材料': '',
+      '职业': '老师', '我能提供': '课程建议', '我在寻找': '同行交流', '一句话证明你玩过剑网3': '',
     };
     for (const [label, value] of Object.entries(expectedValues)) {
       expect(await screen.findByLabelText(label)).toHaveValue(value);
@@ -854,7 +858,7 @@ describe('user workflow pages', () => {
     const user = userEvent.setup();
     render(<ProfilePage onSessionRefresh={vi.fn()} />);
 
-    expect(await screen.findByLabelText('辅助认证材料')).toHaveValue('旧角色截图说明');
+    expect(await screen.findByLabelText('一句话证明你玩过剑网3')).toHaveValue('旧角色截图说明');
     expect(screen.getByText('认证未通过原因：截图中的区服信息不清晰')).toBeVisible();
     await user.click(screen.getByRole('button', { name: '提交身份认证' }));
 
@@ -888,7 +892,7 @@ describe('user workflow pages', () => {
       verification: { status: 'approved', supportMaterial: '旧材料', rejectReason: null },
     })));
     expect(screen.getByLabelText('昵称')).toHaveValue('新名片');
-    expect(screen.getByLabelText('辅助认证材料')).toHaveValue('新材料');
+    expect(screen.getByLabelText('一句话证明你玩过剑网3')).toHaveValue('新材料');
   });
 
   it('aborts profile submission and skips session refresh after unmount', async () => {
@@ -1030,7 +1034,7 @@ describe('user workflow pages', () => {
 
     expect(await screen.findByText('本地摄影帮忙')).toBeVisible();
     expect(screen.queryByText('pending-secret')).not.toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: '同意见面聊聊' })[0]);
+    await user.click(screen.getAllByRole('button', { name: '同意聊聊（交换联系方式）' })[0]);
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       '/api/contact/21/approve',
       expect.objectContaining({ method: 'POST' }),
@@ -1057,9 +1061,9 @@ describe('user workflow pages', () => {
     render(<ContactPage />);
 
     await screen.findByText('第一份申请');
-    await user.click(screen.getAllByRole('button', { name: '同意见面聊聊' })[0]);
+    await user.click(screen.getAllByRole('button', { name: '同意聊聊（交换联系方式）' })[0]);
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    for (const button of screen.getAllByRole('button', { name: /同意见面聊聊|暂不合适/ })) {
+    for (const button of screen.getAllByRole('button', { name: /同意聊聊（交换联系方式）|暂不合适/ })) {
       expect(button).toBeDisabled();
     }
     fireEvent.click(screen.getAllByRole('button', { name: '暂不合适' })[1]);
@@ -1077,7 +1081,7 @@ describe('user workflow pages', () => {
     const view = render(<ContactPage />);
 
     await screen.findByText('卸载申请');
-    await user.click(screen.getByRole('button', { name: '同意见面聊聊' }));
+    await user.click(screen.getByRole('button', { name: '同意聊聊（交换联系方式）' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     const mutationSignal = fetch.mock.calls[1][1].signal;
 
@@ -1102,9 +1106,9 @@ describe('user workflow pages', () => {
     render(<ContactPage />);
 
     await screen.findByText('等待刷新甲');
-    await user.click(screen.getAllByRole('button', { name: '同意见面聊聊' })[0]);
+    await user.click(screen.getAllByRole('button', { name: '同意聊聊（交换联系方式）' })[0]);
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
-    for (const button of screen.getAllByRole('button', { name: /同意见面聊聊|暂不合适/ })) {
+    for (const button of screen.getAllByRole('button', { name: /同意聊聊（交换联系方式）|暂不合适/ })) {
       expect(button).toBeDisabled();
     }
     fireEvent.click(screen.getAllByRole('button', { name: '暂不合适' })[1]);
@@ -1144,7 +1148,7 @@ describe('user workflow pages', () => {
     render(<ContactPage />);
 
     await screen.findByText('错误申请');
-    await user.click(screen.getByRole('button', { name: '同意见面聊聊' }));
+    await user.click(screen.getByRole('button', { name: '同意聊聊（交换联系方式）' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('处理申请失败');
   });
 

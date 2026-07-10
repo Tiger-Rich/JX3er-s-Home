@@ -70,7 +70,7 @@ export default function ContactPage() {
       if (!mountedRef.current || owner.version !== requestId) return;
       setFeedback({
         type: 'success',
-        message: decision === 'approve' ? '已同意见面聊聊。' : '已回复暂不合适。',
+        message: decision === 'approve' ? '已同意聊聊，联系方式已交换。' : '已回复暂不合适。',
       });
       await loadApplications();
     } catch (error) {
@@ -111,7 +111,7 @@ export default function ContactPage() {
                 {direction === 'incoming' && application.status === 'pending' && (
                   <div className="action-row">
                     <button type="button" disabled={busyId !== null} className="button-primary" onClick={() => decide(application.id, 'approve')}>
-                      <Check aria-hidden="true" size={18} />同意见面聊聊
+                      <Check aria-hidden="true" size={18} />同意聊聊（交换联系方式）
                     </button>
                     <button type="button" disabled={busyId !== null} onClick={() => decide(application.id, 'reject')} className="button-danger">
                       <X aria-hidden="true" size={18} />暂不合适

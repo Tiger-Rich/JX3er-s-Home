@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send } from 'lucide-react';
 
 import { api } from '../api/client.js';
-import { requestTypes, verificationLabels } from '../domain/constants.js';
+import { requestTypes } from '../domain/constants.js';
 
 const initialForm = {
   type: 'job_referral', title: '', description: '', city: '', remote: false,
@@ -99,7 +99,7 @@ export default function CreateRequestPage({ session }) {
       <h2 id="create-title">发个委托</h2>
       <p className="page-intro">有事说清楚，合作才走得稳。</p>
       <p className="boundary-copy">万事屋不接账号交易、代练、外挂、私服相关委托，也不承诺求职或交易结果。</p>
-      {!approved && <p role="status">{verificationLabels[session?.verificationStatus] || '请先完成身份认证'}</p>}
+      {!approved && <p role="status" className="attention-copy">请点击我的名片提交认证</p>}
       <form onSubmit={submit} noValidate>
         <label>类型<select name="type" value={form.type} onChange={update} required>{requestTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
         <label>标题<input name="title" value={form.title} onChange={update} required maxLength={160} /></label>

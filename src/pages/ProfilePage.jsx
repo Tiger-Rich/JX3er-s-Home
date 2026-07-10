@@ -9,6 +9,10 @@ const emptyForm = {
   startedYear: '', industry: '', occupation: '', canOffer: '', lookingFor: '', supportMaterial: '',
 };
 
+function RequiredMark() {
+  return <span className="required-mark" aria-hidden="true">*</span>;
+}
+
 function formFromResponse(result) {
   const profile = result.profile ?? {};
   const user = result.user ?? {};
@@ -147,16 +151,16 @@ export default function ProfilePage({ onSessionRefresh }) {
           <form onSubmit={submit}>
             <label>昵称<input name="nickname" value={form.nickname} onChange={update} readOnly={readOnly} required maxLength={40} /></label>
             <label>城市<input name="city" value={form.city} onChange={update} readOnly={readOnly} maxLength={40} /></label>
-            <label>联系方式<input name="contactValue" value={form.contactValue} onChange={update} readOnly={readOnly} required maxLength={160} /></label>
-            <label>区服<input name="server" value={form.server} onChange={update} readOnly={readOnly} required maxLength={80} /></label>
-            <label>游戏 ID/昵称<input name="gameNickname" value={form.gameNickname} onChange={update} readOnly={readOnly} required maxLength={80} /></label>
+            <label><span>联系方式<RequiredMark /></span><input aria-label="联系方式" name="contactValue" value={form.contactValue} onChange={update} readOnly={readOnly} required maxLength={160} /></label>
+            <label><span>区服<RequiredMark /></span><input aria-label="区服" name="server" value={form.server} onChange={update} readOnly={readOnly} required maxLength={80} /></label>
+            <label><span>游戏 ID/昵称<RequiredMark /></span><input aria-label="游戏 ID/昵称" name="gameNickname" value={form.gameNickname} onChange={update} readOnly={readOnly} required maxLength={80} /></label>
             <label>门派<input name="sect" value={form.sect} onChange={update} readOnly={readOnly} maxLength={40} /></label>
             <label>入坑年份<input name="startedYear" type="number" min="2009" max={new Date().getFullYear()} value={form.startedYear} onChange={update} readOnly={readOnly} /></label>
             <label>行业<input name="industry" value={form.industry} onChange={update} readOnly={readOnly} maxLength={80} /></label>
             <label>职业<input name="occupation" value={form.occupation} onChange={update} readOnly={readOnly} maxLength={80} /></label>
             <label>我能提供<textarea name="canOffer" value={form.canOffer} onChange={update} readOnly={readOnly} maxLength={500} /></label>
             <label>我在寻找<textarea name="lookingFor" value={form.lookingFor} onChange={update} readOnly={readOnly} maxLength={500} /></label>
-            <label>辅助认证材料<textarea name="supportMaterial" value={form.supportMaterial} onChange={update} readOnly={readOnly} maxLength={500} /></label>
+            <label>一句话证明你玩过剑网3<textarea name="supportMaterial" value={form.supportMaterial} onChange={update} readOnly={readOnly} maxLength={500} /></label>
             {canSubmit && (
               <button type="submit" disabled={submitting} className="button-primary">
                 <Send aria-hidden="true" size={18} />提交身份认证
