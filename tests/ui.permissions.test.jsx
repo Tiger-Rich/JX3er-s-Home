@@ -409,6 +409,46 @@ describe('user workflow pages', () => {
     expect(screen.queryByText('匿名')).not.toBeInTheDocument();
   });
 
+  it('does not offer contact application controls on the viewer own request', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      request: {
+        id: 13,
+        ownerId: 7,
+        type: 'industry_consulting',
+        title: '自己的行业咨询委托',
+        description: '我发布的委托不应该允许自己递出联系申请。',
+        city: '上海',
+        remote: true,
+        industry: '游戏',
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        owner: {
+          nickname: '七秀同门',
+          server: '梦江南',
+          gameNickname: '秀水灵心',
+          sect: '七秀',
+          startedYear: 2013,
+          city: '苏州',
+          industry: '游戏研发',
+          occupation: '产品经理',
+          verificationStatus: 'approved',
+        },
+      },
+    }));
+
+    render(
+      <RequestDetailPage
+        requestId={13}
+        session={{ user: { id: 7 }, verificationStatus: 'approved' }}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: '自己的行业咨询委托' })).toBeVisible();
+    expect(screen.getByText('这是你发布的委托，其他番薯递出联系申请后会在联系申请里出现。')).toBeVisible();
+    expect(screen.queryByLabelText('一句话联系申请')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '递出联系申请' })).not.toBeInTheDocument();
+  });
+
   it('posts detail actions with their required bodies and calls the back handler', async () => {
     const onBack = vi.fn();
     fetch.mockImplementation((path, options = {}) => {

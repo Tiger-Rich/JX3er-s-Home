@@ -24,6 +24,9 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
   const loadOwnerRef = useRef({ controller: null, version: 0 });
   const mutationOwnerRef = useRef({ controller: null, version: 0 });
   const approved = session?.verificationStatus === 'approved';
+  const isOwnRequest =
+    state.request?.ownerId !== undefined &&
+    session?.user?.id === state.request.ownerId;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -153,7 +156,9 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
           </section>
 
           <section className="detail-card">
-            {approved ? (
+            {isOwnRequest ? (
+              <p className="boundary-copy">这是你发布的委托，其他番薯递出联系申请后会在联系申请里出现。</p>
+            ) : approved ? (
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
