@@ -100,14 +100,15 @@ export async function api(path, options = {}) {
   } = options;
   const headers = { ...customHeaders };
   const token = getToken();
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
 
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (body !== undefined && !isFormData) headers['Content-Type'] = 'application/json';
 
   const response = await fetch(path, {
     ...requestOptions,
     headers,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: isFormData ? body : JSON.stringify(body) }),
   });
 
   if (response.status === 204) return null;

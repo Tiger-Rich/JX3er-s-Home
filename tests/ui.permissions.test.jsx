@@ -38,6 +38,20 @@ function deferred() {
   return { promise, reject, resolve };
 }
 
+function fillDefaultJobReferralDetails(values = {}) {
+  const details = {
+    targetRole: '前端工程师',
+    targetIndustry: '互联网',
+    careerStage: '三年经验，看新机会',
+    helpWanted: '希望获得内推和简历建议。',
+    ...values,
+  };
+  fireEvent.change(screen.getByLabelText('目标岗位'), { target: { value: details.targetRole } });
+  fireEvent.change(screen.getByLabelText('目标行业'), { target: { value: details.targetIndustry } });
+  fireEvent.change(screen.getByLabelText('当前阶段'), { target: { value: details.careerStage } });
+  fireEvent.change(screen.getByLabelText('希望获得的帮助'), { target: { value: details.helpWanted } });
+}
+
 describe('application shells', () => {
   it('shows the approved user navigation and identity-first header copy', async () => {
     const onTabChange = vi.fn();
@@ -216,6 +230,20 @@ describe('API client', () => {
 
     setToken(null);
     expect(getToken()).toBeNull();
+  });
+
+  it('sends FormData without forcing a JSON content type', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const formData = new FormData();
+    formData.append('title', 'typed request');
+
+    await api('/api/requests', { method: 'POST', body: formData });
+
+    expect(fetch).toHaveBeenCalledWith('/api/requests', expect.objectContaining({
+      method: 'POST',
+      body: formData,
+      headers: expect.not.objectContaining({ 'Content-Type': expect.any(String) }),
+    }));
   });
 
   it('handles 204 responses and exposes public errors with status', async () => {
@@ -624,6 +652,45 @@ describe('user workflow pages', () => {
     expect(screen.queryByText('匿名')).not.toBeInTheDocument();
   });
 
+  it('offers exactly the six active request types and no fandom help type', () => {
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    const options = within(screen.getByLabelText('类型')).getAllByRole('option');
+    expect(options).toHaveLength(6);
+    expect(options.map((option) => option.value)).toEqual([
+      'job_referral',
+      'industry_consulting',
+      'trade',
+      'commission',
+      'local_help',
+      'other',
+    ]);
+    expect(screen.queryByRole('option', { name: '追星互助' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('委托说明')).not.toBeInTheDocument();
+  });
+
+  it('switches request types between dynamic fields and keeps optional extra notes', async () => {
+    const user = userEvent.setup();
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    expect(screen.getByLabelText('目标岗位')).toBeVisible();
+    expect(screen.getByLabelText('补充说明（选填）')).toBeVisible();
+
+    await user.selectOptions(screen.getByLabelText('类型'), 'industry_consulting');
+    expect(screen.getByLabelText('咨询方向')).toBeVisible();
+    expect(screen.getByLabelText('具体问题')).toBeVisible();
+    expect(screen.getByLabelText('期望交流方式')).toBeVisible();
+    expect(screen.getByLabelText('补充说明（选填）')).toBeVisible();
+    expect(screen.queryByLabelText('买卖交易图片')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('类型'), 'trade');
+    expect(screen.getByLabelText('物品/服务名称')).toBeVisible();
+    expect(screen.getByLabelText('价格或交换方式')).toBeVisible();
+    expect(screen.getByLabelText('交易/发货方式')).toBeVisible();
+    expect(screen.getByLabelText('买卖交易图片')).toBeVisible();
+    expect(screen.getByLabelText('补充说明（选填）')).toBeVisible();
+  });
+
   it('validates required publishing fields and the city or remote rule', async () => {
     const user = userEvent.setup();
     render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
@@ -634,10 +701,10 @@ describe('user workflow pages', () => {
 
     await user.type(screen.getByLabelText('标题'), '远程简历建议');
     await user.click(screen.getByRole('button', { name: '发布委托' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('请填写委托说明。');
+    expect(screen.getByRole('alert')).toHaveTextContent('目标岗位为必填');
     expect(fetch).not.toHaveBeenCalled();
 
-    await user.type(screen.getByLabelText('委托说明'), '希望找有招聘经验的朋友看看简历。');
+    fillDefaultJobReferralDetails();
     fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-01-02T10:30' } });
     await user.click(screen.getByRole('button', { name: '发布委托' }));
     expect(screen.getByRole('alert')).toHaveTextContent('请填写城市，或选择可远程。');
@@ -658,10 +725,11 @@ describe('user workflow pages', () => {
 
     await user.selectOptions(screen.getByLabelText('类型'), 'industry_consulting');
     await user.type(screen.getByLabelText('标题'), '远程行业咨询');
-    await user.type(screen.getByLabelText('委托说明'), '想了解游戏行业产品岗位。');
+    await user.type(screen.getByLabelText('咨询方向'), '游戏行业产品岗位');
+    await user.type(screen.getByLabelText('具体问题'), '想了解日常分工和面试准备。');
+    await user.type(screen.getByLabelText('期望交流方式'), '微信文字或语音');
     await user.click(screen.getByLabelText('可远程'));
-    await user.type(screen.getByLabelText('行业'), '游戏');
-    await user.type(screen.getByLabelText('预算或回报'), '一杯奶茶');
+    await user.type(screen.getByLabelText('补充说明（选填）'), '同门方便的话想先文字聊聊');
     fireEvent.change(screen.getByLabelText('有效期'), { target: { value: localExpiry } });
     await user.click(screen.getByRole('button', { name: '发布委托' }));
 
@@ -669,20 +737,22 @@ describe('user workflow pages', () => {
       '/api/requests',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({
-          type: 'industry_consulting',
-          title: '远程行业咨询',
-          description: '想了解游戏行业产品岗位。',
-          city: null,
-          remote: true,
-          industry: '游戏',
-          budgetOrReward: '一杯奶茶',
-          expiresAt: new Date(localExpiry).toISOString(),
-        }),
+        body: expect.any(FormData),
       }),
     ));
-    const requestBody = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(requestBody.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    const requestBody = fetch.mock.calls[0][1].body;
+    expect(fetch.mock.calls[0][1].headers).not.toHaveProperty('Content-Type');
+    expect(requestBody.get('type')).toBe('industry_consulting');
+    expect(requestBody.get('title')).toBe('远程行业咨询');
+    expect(requestBody.get('city')).toBe('');
+    expect(requestBody.get('remote')).toBe('true');
+    expect(requestBody.get('expiresAt')).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(JSON.parse(requestBody.get('details'))).toMatchObject({
+      topic: '游戏行业产品岗位',
+      questions: '想了解日常分工和面试准备。',
+      preferredFormat: '微信文字或语音',
+      extraNote: '同门方便的话想先文字聊聊',
+    });
     expect(screen.getByRole('status')).toHaveTextContent('委托已送交掌柜审核。');
   });
 
@@ -692,7 +762,7 @@ describe('user workflow pages', () => {
     render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
 
     fireEvent.change(screen.getByLabelText('标题'), { target: { value: '同步锁测试' } });
-    fireEvent.change(screen.getByLabelText('委托说明'), { target: { value: '连续提交只能发出一个请求。' } });
+    fillDefaultJobReferralDetails();
     fireEvent.click(screen.getByLabelText('可远程'));
     fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
     const form = screen.getByRole('button', { name: '发布委托' }).closest('form');
@@ -712,7 +782,7 @@ describe('user workflow pages', () => {
     const view = render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
 
     fireEvent.change(screen.getByLabelText('标题'), { target: { value: '卸载保护测试' } });
-    fireEvent.change(screen.getByLabelText('委托说明'), { target: { value: '卸载后不再更新表单。' } });
+    fillDefaultJobReferralDetails();
     fireEvent.click(screen.getByLabelText('可远程'));
     fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
     fireEvent.submit(screen.getByRole('button', { name: '发布委托' }).closest('form'));
@@ -732,15 +802,33 @@ describe('user workflow pages', () => {
     render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
 
     await user.type(screen.getByLabelText('标题'), '杭州线下拍摄协助');
-    await user.type(screen.getByLabelText('委托说明'), '需要一位周末能到场的摄影同好。');
+    fillDefaultJobReferralDetails({ helpWanted: '需要一位周末能到场的摄影同好。' });
     await user.type(screen.getByLabelText('城市'), '杭州');
     fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
     await user.click(screen.getByRole('button', { name: '发布委托' }));
 
     await waitFor(() => {
-      const body = JSON.parse(fetch.mock.calls[0][1].body);
-      expect(body).toMatchObject({ city: '杭州', remote: false });
+      const body = fetch.mock.calls[0][1].body;
+      expect(body.get('city')).toBe('杭州');
+      expect(body.get('remote')).toBe('false');
     });
+  });
+
+  it('shows trade image upload previews and supports removing images', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn((file) => `blob:${file.name}`);
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    await user.selectOptions(screen.getByLabelText('类型'), 'trade');
+    const image = new File(['fake image'], 'sweet-potato.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText('买卖交易图片'), image);
+
+    expect(screen.getByAltText('sweet-potato.png')).toBeVisible();
+    expect(createObjectURL).toHaveBeenCalledWith(image);
+    await user.click(screen.getByRole('button', { name: '移除图片：sweet-potato.png' }));
+    expect(screen.queryByAltText('sweet-potato.png')).not.toBeInTheDocument();
   });
 
   it('does not infer create feedback semantics from message text', async () => {
@@ -749,7 +837,7 @@ describe('user workflow pages', () => {
     render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
 
     await user.type(screen.getByLabelText('标题'), '错误语义测试');
-    await user.type(screen.getByLabelText('委托说明'), '服务端错误必须是 alert。');
+    fillDefaultJobReferralDetails({ helpWanted: '服务端错误必须是 alert。' });
     await user.click(screen.getByLabelText('可远程'));
     fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
     await user.click(screen.getByRole('button', { name: '发布委托' }));

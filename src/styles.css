@@ -497,6 +497,43 @@ textarea[readonly] {
   accent-color: var(--accent);
 }
 
+.typed-fields,
+.image-upload-field {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.image-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.image-preview-grid figure {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+
+.image-preview-grid img,
+.request-image-grid img,
+.admin-request-image-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 207, 190, 0.88);
+  background: var(--surface-muted);
+}
+
+.image-preview-grid button {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
 .request-detail-page {
   display: grid;
   gap: 12px;
