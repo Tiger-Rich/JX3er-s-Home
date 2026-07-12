@@ -7,6 +7,8 @@ import {
   VERIFICATION_STATUSES,
   isAdmin,
 } from '../domain.js';
+import { parseRequestDetails } from '../requestDetails.js';
+import { loadImagesForRequests } from '../requestImages.js';
 
 function clientError(status, message) {
   const error = new Error(message);
@@ -54,6 +56,8 @@ function reviewedRequestDto(row) {
     type: row.type,
     title: row.title,
     description: row.description,
+    details: parseRequestDetails(row.details),
+    images: row.images ?? [],
     city: row.city,
     remote: Boolean(row.remote),
     industry: row.industry,
@@ -69,8 +73,8 @@ function reviewedRequestDto(row) {
 }
 
 const ADMIN_REQUEST_QUERY = `
-  SELECT r.id, r.ownerId, r.type, r.title, r.description, r.city, r.remote,
-         r.industry, r.budgetOrReward, r.expiresAt, r.status,
+  SELECT r.id, r.ownerId, r.type, r.title, r.description, r.details,
+         r.city, r.remote, r.industry, r.budgetOrReward, r.expiresAt, r.status,
          r.rejectReason, r.takedownReason, r.createdAt, r.updatedAt,
          u.nickname AS ownerNickname, u.city AS ownerCity,
          p.server AS ownerServer, p.gameNickname AS ownerGameNickname,
@@ -85,6 +89,15 @@ const ADMIN_REQUEST_QUERY = `
 
 function loadReviewedRequest(db, id) {
   return db.prepare(`${ADMIN_REQUEST_QUERY} WHERE r.id = ?`).get(id);
+}
+
+function loadReviewedRequestWithImages(db, id) {
+  const row = loadReviewedRequest(db, id);
+  if (!row) return null;
+  return {
+    ...row,
+    images: loadImagesForRequests(db, [row.id]).get(row.id) ?? [],
+  };
 }
 
 function verificationDto(row) {
@@ -242,7 +255,18 @@ export function createAdminRouter(db) {
       const rows = db
         .prepare(`${ADMIN_REQUEST_QUERY}${where} ORDER BY r.id DESC`)
         .all(...values);
-      return res.json({ requests: rows.map((row) => reviewedRequestDto(row)) });
+      const imagesByRequestId = loadImagesForRequests(
+        db,
+        rows.map((row) => row.id),
+      );
+      return res.json({
+        requests: rows.map((row) =>
+          reviewedRequestDto({
+            ...row,
+            images: imagesByRequestId.get(row.id) ?? [],
+          }),
+        ),
+      });
     } catch (error) {
       return next(error);
     }
@@ -285,7 +309,9 @@ export function createAdminRouter(db) {
             error: 'Request cannot be reviewed in its current state',
           });
         }
-        return res.json({ request: reviewedRequestDto(loadReviewedRequest(db, id)) });
+        return res.json({
+          request: reviewedRequestDto(loadReviewedRequestWithImages(db, id)),
+        });
       } catch (error) {
         return next(error);
       }

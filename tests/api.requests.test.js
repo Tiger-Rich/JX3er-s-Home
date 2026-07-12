@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../server/app.js';
@@ -103,6 +104,7 @@ describe('request, contact, and admin API', () => {
 
   afterEach(() => {
     db?.close();
+    rmSync('uploads', { recursive: true, force: true });
   });
 
   function insertUser({
@@ -184,6 +186,20 @@ describe('request, contact, and admin API', () => {
       });
   }
 
+  function multipartPublish(ownerId, fields, files = []) {
+    const call = request(app).post('/api/requests').set(auth(ownerId));
+    for (const [key, value] of Object.entries(fields)) {
+      call.field(key, typeof value === 'string' ? value : JSON.stringify(value));
+    }
+    for (const file of files) {
+      call.attach('images', Buffer.from(file.content), {
+        filename: file.filename,
+        contentType: file.contentType,
+      });
+    }
+    return call;
+  }
+
   it('publishes a pending non-anonymous request for an approved owner', async () => {
     const response = await publish();
 
@@ -215,6 +231,137 @@ describe('request, contact, and admin API', () => {
       title: 'Need a portfolio review',
       remote: 0,
     });
+  });
+
+  it('publishes trade images and returns them in public and admin DTOs', async () => {
+    const response = await multipartPublish(
+      users.qixiu,
+      {
+        type: 'trade',
+        title: 'Sweet potato gift box',
+        city: 'Hangzhou',
+        remote: 'false',
+        industry: 'Design',
+        expiresAt: FUTURE,
+        details: validDetails('trade'),
+      },
+      [
+        {
+          filename: 'sweet-potato.png',
+          contentType: 'image/png',
+          content: 'fake png bytes',
+        },
+      ],
+    );
+
+    expect(response.status).toBe(201);
+    expect(response.body.request).toMatchObject({
+      type: 'trade',
+      details: validDetails('trade'),
+      images: [
+        expect.objectContaining({
+          id: expect.any(Number),
+          url: expect.stringMatching(/^\/uploads\/request-images\/.+\.png$/),
+          mimeType: 'image/png',
+          sizeBytes: expect.any(Number),
+          sortOrder: 0,
+        }),
+      ],
+    });
+
+    const approval = await request(app)
+      .post(`/api/admin/requests/${response.body.request.id}/approve`)
+      .set(auth(users.admin));
+    expect(approval.status).toBe(200);
+    expect(approval.body.request).toMatchObject({
+      details: validDetails('trade'),
+      images: response.body.request.images,
+    });
+
+    const detail = await request(app).get(
+      `/api/requests/${response.body.request.id}`,
+    );
+    expect(detail.status).toBe(200);
+    expect(detail.body.request.images).toEqual(response.body.request.images);
+
+    const adminList = await request(app)
+      .get('/api/admin/requests?type=trade')
+      .set(auth(users.admin));
+    expect(adminList.status).toBe(200);
+    expect(adminList.body.requests).toContainEqual(
+      expect.objectContaining({
+        id: response.body.request.id,
+        details: validDetails('trade'),
+        images: response.body.request.images,
+      }),
+    );
+  });
+
+  it('rejects images on non-trade multipart publications', async () => {
+    const response = await multipartPublish(
+      users.qixiu,
+      {
+        type: 'commission',
+        title: 'Portfolio review',
+        remote: 'true',
+        expiresAt: FUTURE,
+        details: validDetails('commission'),
+      },
+      [
+        {
+          filename: 'portfolio.png',
+          contentType: 'image/png',
+          content: 'fake png bytes',
+        },
+      ],
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('trade');
+  });
+
+  it('rejects unsupported trade image types', async () => {
+    const response = await multipartPublish(
+      users.qixiu,
+      {
+        type: 'trade',
+        title: 'Keyboard',
+        remote: 'true',
+        expiresAt: FUTURE,
+        details: validDetails('trade'),
+      },
+      [
+        {
+          filename: 'keyboard.gif',
+          contentType: 'image/gif',
+          content: 'fake gif bytes',
+        },
+      ],
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('image');
+  });
+
+  it('rejects more than six trade images', async () => {
+    const response = await multipartPublish(
+      users.qixiu,
+      {
+        type: 'trade',
+        title: 'Keyboard',
+        remote: 'true',
+        expiresAt: FUTURE,
+        details: validDetails('trade'),
+      },
+      Array.from({ length: 7 }, (_, index) => ({
+        filename: `keyboard-${index}.png`,
+        contentType: 'image/png',
+        content: `fake png bytes ${index}`,
+      })),
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('image');
   });
 
   it.each([

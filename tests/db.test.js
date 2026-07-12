@@ -7,6 +7,7 @@ const expectedTables = [
   'favorites',
   'profiles',
   'reports',
+  'request_images',
   'requests',
   'users',
   'verifications',
@@ -55,6 +56,23 @@ describe('SQLite database', () => {
       notnull: 1,
       defaultValue: "'{}'",
     });
+  });
+
+  it('creates request image storage for trade photos', () => {
+    const imageColumns = db
+      .prepare('PRAGMA table_info(request_images)')
+      .all()
+      .map(({ name }) => name);
+
+    expect(imageColumns).toEqual([
+      'id',
+      'requestId',
+      'url',
+      'mimeType',
+      'sizeBytes',
+      'sortOrder',
+      'createdAt',
+    ]);
   });
 
   it.each([

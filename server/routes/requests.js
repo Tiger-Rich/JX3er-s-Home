@@ -13,6 +13,11 @@ import {
   parseRequestDetails,
   requestIndustry,
 } from '../requestDetails.js';
+import {
+  insertRequestImages,
+  loadImagesForRequests,
+  requestImageUpload,
+} from '../requestImages.js';
 
 const REQUEST_COLUMNS = `
   r.id, r.ownerId, r.type, r.title, r.description, r.details, r.city,
@@ -64,6 +69,31 @@ function optionalText(value, field, maxLength) {
   return normalized || null;
 }
 
+function parseMultipartDetails(value) {
+  if (typeof value !== 'string') {
+    throw clientError(400, 'details must be a JSON object');
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw clientError(400, 'details must be valid JSON');
+  }
+}
+
+function parseRemote(value, multipart) {
+  if (value === undefined) return false;
+  if (multipart) {
+    if (!['true', 'false'].includes(value)) {
+      throw clientError(400, 'remote must be true or false');
+    }
+    return value === 'true';
+  }
+  if (typeof value !== 'boolean') {
+    throw clientError(400, 'remote must be a boolean');
+  }
+  return value;
+}
+
 function futureUtcIso(value) {
   const input = requiredText(value, 'expiresAt', 64);
   if (input !== value || !UTC_ISO_PATTERN.test(input)) {
@@ -95,6 +125,7 @@ function requestDto(row, includeOwner = true) {
     title: row.title,
     description: row.description,
     details: parseRequestDetails(row.details),
+    images: row.images ?? [],
     city: row.city,
     remote: Boolean(row.remote),
     industry: row.industry,
@@ -146,6 +177,11 @@ function requireVerified(permission) {
 export function createRequestsRouter(db) {
   const router = Router();
 
+  function maybeUploadImages(req, res, next) {
+    if (!req.is('multipart/form-data')) return next();
+    return requestImageUpload(req, res, next);
+  }
+
   router.get('/', (req, res, next) => {
     try {
       const clauses = [
@@ -184,7 +220,15 @@ export function createRequestsRouter(db) {
                     datetime(r.createdAt) DESC, r.id DESC`,
         )
         .all(...values);
-      return res.json({ requests: rows.map((row) => requestDto(row)) });
+      const imagesByRequestId = loadImagesForRequests(
+        db,
+        rows.map((row) => row.id),
+      );
+      return res.json({
+        requests: rows.map((row) =>
+          requestDto({ ...row, images: imagesByRequestId.get(row.id) ?? [] }),
+        ),
+      });
     } catch (error) {
       return next(error);
     }
@@ -194,7 +238,9 @@ export function createRequestsRouter(db) {
     try {
       const row = publicRequestById(db, positiveId(req.params.id));
       if (!row) return res.status(404).json({ error: 'Request not found' });
-      return res.json({ request: requestDto(row) });
+      const images =
+        loadImagesForRequests(db, [row.id]).get(row.id) ?? [];
+      return res.json({ request: requestDto({ ...row, images }) });
     } catch (error) {
       return next(error);
     }
@@ -204,23 +250,29 @@ export function createRequestsRouter(db) {
     '/',
     requireUser(db),
     requireVerified(canPublishRequest),
+    maybeUploadImages,
     (req, res, next) => {
       try {
+        const multipart = req.is('multipart/form-data');
+        const files = req.files ?? [];
         const body = req.body ?? {};
         const type = requiredText(body.type, 'type', 40);
         if (!Object.hasOwn(REQUEST_TYPES, type)) {
           throw clientError(400, 'Invalid request type');
         }
         const title = requiredText(body.title, 'title', 160);
-        const details = normalizeRequestDetails(type, body.details);
+        const rawDetails = multipart
+          ? parseMultipartDetails(body.details)
+          : body.details;
+        const details = normalizeRequestDetails(type, rawDetails);
         const description = buildRequestDescription(type, details);
         const city = optionalText(body.city, 'city', 80);
-        if (body.remote !== undefined && typeof body.remote !== 'boolean') {
-          throw clientError(400, 'remote must be a boolean');
-        }
-        const remote = body.remote === true;
+        const remote = parseRemote(body.remote, multipart);
         if (!city && !remote) {
           throw clientError(400, 'city or remote=true is required');
+        }
+        if (files.length > 0 && type !== 'trade') {
+          throw clientError(400, 'Images are only allowed for trade requests');
         }
         const expiresAt = futureUtcIso(body.expiresAt);
 
@@ -244,25 +296,32 @@ export function createRequestsRouter(db) {
           ),
           expiresAt,
         };
-        const result = db
-          .prepare(
-            `INSERT INTO requests
-               (ownerId, type, title, description, details, city, remote,
-                industry, budgetOrReward, expiresAt, status)
-             VALUES (@ownerId, @type, @title, @description, @details, @city,
-                     @remote, @industry, @budgetOrReward, @expiresAt,
-                     'pending')`,
-          )
-          .run(values);
-        const row = db
-          .prepare(
-            `SELECT id, ownerId, type, title, description, details, city,
-                    remote, industry, budgetOrReward, expiresAt, status,
-                    createdAt, updatedAt
-             FROM requests WHERE id = ?`,
-          )
-          .get(Number(result.lastInsertRowid));
-        return res.status(201).json({ request: requestDto(row, false) });
+        const createRequest = db.transaction(() => {
+          const result = db
+            .prepare(
+              `INSERT INTO requests
+                 (ownerId, type, title, description, details, city, remote,
+                  industry, budgetOrReward, expiresAt, status)
+               VALUES (@ownerId, @type, @title, @description, @details, @city,
+                       @remote, @industry, @budgetOrReward, @expiresAt,
+                       'pending')`,
+            )
+            .run(values);
+          const requestId = Number(result.lastInsertRowid);
+          const images = insertRequestImages(db, requestId, files);
+          const row = db
+            .prepare(
+              `SELECT id, ownerId, type, title, description, details, city,
+                      remote, industry, budgetOrReward, expiresAt, status,
+                      createdAt, updatedAt
+               FROM requests WHERE id = ?`,
+            )
+            .get(requestId);
+          return { ...row, images };
+        });
+        return res
+          .status(201)
+          .json({ request: requestDto(createRequest(), false) });
       } catch (error) {
         return next(error);
       }
