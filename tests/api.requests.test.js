@@ -24,6 +24,66 @@ function expectNoKeys(value, keys = FORBIDDEN_KEYS) {
   for (const key of keys) expect(serialized).not.toContain(`\"${key}\"`);
 }
 
+function validDetails(type = 'commission', overrides = {}) {
+  const detailsByType = {
+    job_referral: {
+      targetRole: 'Product Manager',
+      targetIndustry: 'Internet',
+      careerStage: 'Mid-level',
+      helpWanted: 'Referral and resume feedback',
+      targetCompany: 'Example Co',
+      resumeHighlights: 'Shipped growth projects',
+      extraNote: 'Prefer async first.',
+    },
+    industry_consulting: {
+      topic: 'Game industry product roles',
+      questions: 'How should I prepare portfolio case studies?',
+      preferredFormat: 'Video chat',
+      background: 'Transitioning from SaaS.',
+      expectedPeer: 'Product lead',
+      reward: 'Coffee',
+      extraNote: 'Weekends work best.',
+    },
+    trade: {
+      itemName: 'Mechanical keyboard',
+      price: '300 RMB',
+      condition: 'Lightly used',
+      deliveryMethod: 'Local pickup',
+      negotiable: 'Yes',
+      afterSalesBoundary: 'No return after inspection',
+      extraNote: 'Can include spare keycaps.',
+    },
+    commission: {
+      commissionContent: 'Portfolio review',
+      deliverables: 'Written feedback',
+      budget: 'Coffee',
+      deadline: 'Next Friday',
+      styleReference: 'Product design hiring bar',
+      usage: 'Personal job search',
+      commercialUse: 'No',
+      extraNote: 'Focus on storytelling.',
+    },
+    local_help: {
+      helpTask: 'Move a desk',
+      area: 'Hangzhou Xihu',
+      timeWindow: 'Saturday afternoon',
+      headcount: '2 people',
+      costShare: 'Dinner covered',
+      safetyNote: 'Public community space',
+      extraNote: 'Elevator available.',
+    },
+    other: {
+      requestKind: 'Study group',
+      helpWanted: 'Find peers for mock interviews',
+      reward: 'Mutual practice',
+      background: 'Preparing for interviews.',
+      constraints: 'Remote only',
+      extraNote: 'Evenings preferred.',
+    },
+  };
+  return { ...detailsByType[type], ...overrides };
+}
+
 describe('request, contact, and admin API', () => {
   let app;
   let db;
@@ -82,15 +142,26 @@ describe('request, contact, and admin API', () => {
     city = 'Hangzhou',
     remote = 0,
     industry = 'Technology',
+    details = validDetails(type),
   } = {}) {
     const result = db
       .prepare(
          `INSERT INTO requests
            (ownerId, type, title, description, city, remote, industry,
-            budgetOrReward, expiresAt, status)
-         VALUES (?, ?, ?, 'Detailed request', ?, ?, ?, 'Coffee', ?, ?)`,
+            budgetOrReward, expiresAt, status, details)
+         VALUES (?, ?, ?, 'Detailed request', ?, ?, ?, 'Coffee', ?, ?, ?)`,
       )
-      .run(ownerId, type, title, city, remote, industry, expiresAt, status);
+      .run(
+        ownerId,
+        type,
+        title,
+        city,
+        remote,
+        industry,
+        expiresAt,
+        status,
+        JSON.stringify(details),
+      );
     return Number(result.lastInsertRowid);
   }
 
@@ -102,6 +173,7 @@ describe('request, contact, and admin API', () => {
         type: 'commission',
         title: 'Need a portfolio review',
         description: 'Please review one product design portfolio.',
+        details: validDetails('commission'),
         city: 'Hangzhou',
         remote: false,
         industry: 'Design',
@@ -120,6 +192,9 @@ describe('request, contact, and admin API', () => {
       ownerId: users.qixiu,
       type: 'commission',
       title: 'Need a portfolio review',
+      description:
+        '委托内容：Portfolio review；交付物：Written feedback；预算：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
+      details: validDetails('commission'),
       status: 'pending',
       remote: false,
       expiresAt: FUTURE,
@@ -140,6 +215,87 @@ describe('request, contact, and admin API', () => {
       title: 'Need a portfolio review',
       remote: 0,
     });
+  });
+
+  it.each([
+    [
+      'job_referral',
+      '目标岗位：Product Manager；目标行业：Internet；当前阶段：Mid-level；希望获得：Referral and resume feedback；补充说明：Prefer async first.',
+      'Internet',
+    ],
+    [
+      'industry_consulting',
+      '咨询方向：Game industry product roles；具体问题：How should I prepare portfolio case studies?；交流方式：Video chat；补充说明：Weekends work best.',
+      'Game industry product roles',
+    ],
+    [
+      'trade',
+      '物品：Mechanical keyboard；价格：300 RMB；成色/规格：Lightly used；交易方式：Local pickup；补充说明：Can include spare keycaps.',
+      'Design',
+    ],
+    [
+      'commission',
+      '委托内容：Portfolio review；交付物：Written feedback；预算：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
+      'Design',
+    ],
+    [
+      'local_help',
+      '互助事项：Move a desk；地点：Hangzhou Xihu；时间：Saturday afternoon；人数：2 people；补充说明：Elevator available.',
+      'Design',
+    ],
+    [
+      'other',
+      '事情类型：Study group；希望帮助：Find peers for mock interviews；回报方式：Mutual practice；补充说明：Evenings preferred.',
+      'Design',
+    ],
+  ])(
+    'publishes %s with typed details and a generated description',
+    async (type, expectedDescription, expectedIndustry) => {
+      const response = await publish(users.qixiu, {
+        type,
+        description: 'Client supplied description must be ignored.',
+        details: validDetails(type),
+      });
+
+      expect(response.status).toBe(201);
+      expect(response.body.request).toMatchObject({
+        type,
+        details: validDetails(type),
+        description: expectedDescription,
+        industry: expectedIndustry,
+      });
+      expect(
+        db
+          .prepare(
+            'SELECT description, details, industry FROM requests WHERE id = ?',
+          )
+          .get(response.body.request.id),
+      ).toEqual({
+        description: expectedDescription,
+        details: JSON.stringify(validDetails(type)),
+        industry: expectedIndustry,
+      });
+    },
+  );
+
+  it('rejects retired fandom help publications', async () => {
+    const response = await publish(users.qixiu, {
+      type: 'fandom_help',
+      details: validDetails('other'),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Invalid request type' });
+  });
+
+  it('rejects publication when a required typed detail is missing', async () => {
+    const response = await publish(users.qixiu, {
+      type: 'commission',
+      details: validDetails('commission', { deadline: '   ' }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'deadline is required' });
   });
 
   it('lets an admin approve a request and exposes safe public list/detail DTOs', async () => {

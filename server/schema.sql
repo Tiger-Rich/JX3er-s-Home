@@ -57,11 +57,11 @@ CREATE TABLE IF NOT EXISTS requests (
       'trade',
       'commission',
       'local_help',
-      'fandom_help',
       'other'
     )),
   title TEXT NOT NULL,
   description TEXT NOT NULL,
+  details TEXT NOT NULL DEFAULT '{}',
   city TEXT,
   remote INTEGER NOT NULL DEFAULT 0 CHECK (remote IN (0, 1)),
   industry TEXT,

@@ -4,7 +4,6 @@ export const requestTypes = [
   { value: 'trade', label: '买卖交易' },
   { value: 'commission', label: '约稿委托' },
   { value: 'local_help', label: '本地互助' },
-  { value: 'fandom_help', label: '追星互助' },
   { value: 'other', label: '其他' },
 ];
 

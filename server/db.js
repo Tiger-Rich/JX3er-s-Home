@@ -12,12 +12,20 @@ export function createDatabase(filename) {
   try {
     db.pragma('foreign_keys = ON');
     db.exec(schema);
+    migrateDatabase(db);
     return db;
   } catch (error) {
     if (db.open) {
       db.close();
     }
     throw error;
+  }
+}
+
+function migrateDatabase(db) {
+  const requestColumns = db.pragma('table_info(requests)');
+  if (!requestColumns.some(({ name }) => name === 'details')) {
+    db.exec("ALTER TABLE requests ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
   }
 }
 

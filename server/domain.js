@@ -4,7 +4,6 @@ export const REQUEST_TYPES = {
   trade: '买卖交易',
   commission: '约稿委托',
   local_help: '本地互助',
-  fandom_help: '追星互助',
   other: '其他',
 };
 

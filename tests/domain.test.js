@@ -25,7 +25,6 @@ describe('domain constants', () => {
       trade: '买卖交易',
       commission: '约稿委托',
       local_help: '本地互助',
-      fandom_help: '追星互助',
       other: '其他',
     });
     expect(requestTypes).toEqual([
@@ -34,7 +33,6 @@ describe('domain constants', () => {
       { value: 'trade', label: '买卖交易' },
       { value: 'commission', label: '约稿委托' },
       { value: 'local_help', label: '本地互助' },
-      { value: 'fandom_help', label: '追星互助' },
       { value: 'other', label: '其他' },
     ]);
   });

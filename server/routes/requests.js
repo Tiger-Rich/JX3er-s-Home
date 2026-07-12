@@ -7,11 +7,17 @@ import {
   canPublishRequest,
   isActiveVerifiedUser,
 } from '../domain.js';
+import {
+  buildRequestDescription,
+  normalizeRequestDetails,
+  parseRequestDetails,
+  requestIndustry,
+} from '../requestDetails.js';
 
 const REQUEST_COLUMNS = `
-  r.id, r.ownerId, r.type, r.title, r.description, r.city, r.remote,
-  r.industry, r.budgetOrReward, r.expiresAt, r.status, r.createdAt,
-  r.updatedAt,
+  r.id, r.ownerId, r.type, r.title, r.description, r.details, r.city,
+  r.remote, r.industry, r.budgetOrReward, r.expiresAt, r.status,
+  r.createdAt, r.updatedAt,
   u.nickname AS ownerNickname, u.city AS ownerCity,
   p.server AS ownerServer, p.gameNickname AS ownerGameNickname,
   p.sect AS ownerSect, p.startedYear AS ownerStartedYear,
@@ -88,6 +94,7 @@ function requestDto(row, includeOwner = true) {
     type: row.type,
     title: row.title,
     description: row.description,
+    details: parseRequestDetails(row.details),
     city: row.city,
     remote: Boolean(row.remote),
     industry: row.industry,
@@ -205,7 +212,8 @@ export function createRequestsRouter(db) {
           throw clientError(400, 'Invalid request type');
         }
         const title = requiredText(body.title, 'title', 160);
-        const description = requiredText(body.description, 'description', 4000);
+        const details = normalizeRequestDetails(type, body.details);
+        const description = buildRequestDescription(type, details);
         const city = optionalText(body.city, 'city', 80);
         if (body.remote !== undefined && typeof body.remote !== 'boolean') {
           throw clientError(400, 'remote must be a boolean');
@@ -221,9 +229,14 @@ export function createRequestsRouter(db) {
           type,
           title,
           description,
+          details: JSON.stringify(details),
           city,
           remote: remote ? 1 : 0,
-          industry: optionalText(body.industry, 'industry', 120),
+          industry: requestIndustry(
+            type,
+            details,
+            optionalText(body.industry, 'industry', 120),
+          ),
           budgetOrReward: optionalText(
             body.budgetOrReward,
             'budgetOrReward',
@@ -234,17 +247,18 @@ export function createRequestsRouter(db) {
         const result = db
           .prepare(
             `INSERT INTO requests
-               (ownerId, type, title, description, city, remote, industry,
-                budgetOrReward, expiresAt, status)
-             VALUES (@ownerId, @type, @title, @description, @city, @remote,
-                     @industry, @budgetOrReward, @expiresAt, 'pending')`,
+               (ownerId, type, title, description, details, city, remote,
+                industry, budgetOrReward, expiresAt, status)
+             VALUES (@ownerId, @type, @title, @description, @details, @city,
+                     @remote, @industry, @budgetOrReward, @expiresAt,
+                     'pending')`,
           )
           .run(values);
         const row = db
           .prepare(
-            `SELECT id, ownerId, type, title, description, city, remote,
-                    industry, budgetOrReward, expiresAt, status, createdAt,
-                    updatedAt
+            `SELECT id, ownerId, type, title, description, details, city,
+                    remote, industry, budgetOrReward, expiresAt, status,
+                    createdAt, updatedAt
              FROM requests WHERE id = ?`,
           )
           .get(Number(result.lastInsertRowid));

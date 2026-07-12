@@ -38,6 +38,25 @@ describe('SQLite database', () => {
     ).toThrow(/FOREIGN KEY constraint failed/);
   });
 
+  it('creates requests with typed details storage', () => {
+    const requestColumns = db
+      .prepare('PRAGMA table_info(requests)')
+      .all()
+      .map(({ name, type, notnull, dflt_value: defaultValue }) => ({
+        name,
+        type,
+        notnull,
+        defaultValue,
+      }));
+
+    expect(requestColumns).toContainEqual({
+      name: 'details',
+      type: 'TEXT',
+      notnull: 1,
+      defaultValue: "'{}'",
+    });
+  });
+
   it.each([
     [
       'user roles',
@@ -58,6 +77,10 @@ describe('SQLite database', () => {
     [
       'request types',
       "INSERT INTO requests (ownerId, type, title, description, expiresAt) VALUES (1, 'boosting', 'Bad type', 'Rejected by CHECK', '2027-01-01 00:00:00')",
+    ],
+    [
+      'retired request types',
+      "INSERT INTO requests (ownerId, type, title, description, expiresAt) VALUES (1, 'fandom_help', 'Bad type', 'Rejected by CHECK', '2027-01-01 00:00:00')",
     ],
     [
       'request statuses',
