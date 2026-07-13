@@ -30,6 +30,28 @@ test('loads the seeded user shell after login', async ({ page }) => {
   await expect(page.getByText('匿名')).toHaveCount(0);
 });
 
+test('shows trade typed fields and image upload controls on the create page', async ({ page }) => {
+  await page.goto('/');
+
+  await page.getByRole('textbox', { name: '账号' }).fill('qixiu');
+  await page.getByLabel('密码').fill('test123');
+  await page.locator('form').getByRole('button', { name: '登录' }).click();
+
+  await page.locator('.bottom-navigation').getByRole('button', { name: '发个委托' }).click();
+  const createPage = page.locator('.create-request-page');
+  await expect(createPage).toBeVisible();
+  await createPage.locator('select[name="type"]').selectOption('trade');
+  await expect(createPage.locator('select[name="type"]')).toHaveValue('trade');
+
+  await createPage.locator('input[name="title"]').fill('自家红薯礼盒');
+  await createPage.locator('input[name="itemName"]').fill('自家红薯礼盒');
+  await createPage.locator('input[name="price"]').fill('68元/箱');
+  await createPage.locator('input[name="condition"]').fill('5斤装');
+  await createPage.locator('input[name="deliveryMethod"]').fill('快递发货');
+
+  await expect(createPage.locator('input[type="file"]')).toBeVisible();
+});
+
 test('keeps feed content clear of the fixed bottom navigation on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');

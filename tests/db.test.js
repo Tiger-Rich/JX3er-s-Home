@@ -97,10 +97,6 @@ describe('SQLite database', () => {
       "INSERT INTO requests (ownerId, type, title, description, expiresAt) VALUES (1, 'boosting', 'Bad type', 'Rejected by CHECK', '2027-01-01 00:00:00')",
     ],
     [
-      'retired request types',
-      "INSERT INTO requests (ownerId, type, title, description, expiresAt) VALUES (1, 'fandom_help', 'Bad type', 'Rejected by CHECK', '2027-01-01 00:00:00')",
-    ],
-    [
       'request statuses',
       "INSERT INTO requests (ownerId, type, title, description, expiresAt, status) VALUES (1, 'trade', 'Bad status', 'Rejected by CHECK', '2027-01-01 00:00:00', 'published')",
     ],

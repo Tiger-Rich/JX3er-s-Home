@@ -174,6 +174,7 @@ export function seedDatabase(db) {
         type,
         title,
         description,
+        details,
         city,
         remote,
         industry,
@@ -181,7 +182,7 @@ export function seedDatabase(db) {
         expiresAt,
         status
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved'
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved'
       WHERE NOT EXISTS (
         SELECT 1 FROM requests WHERE ownerId = ? AND title = ?
       )
@@ -190,6 +191,12 @@ export function seedDatabase(db) {
       'industry_consulting',
       '想了解游戏行业产品岗位的日常',
       '准备转向游戏行业，希望和有相关经验的同门聊聊岗位分工、作品准备与面试节奏。',
+      JSON.stringify({
+        topic: '游戏行业产品岗位',
+        questions: '想了解岗位分工、作品准备与面试节奏',
+        preferredFormat: '微信文字或语音',
+        background: '准备转向游戏行业',
+      }),
       '杭州',
       1,
       '游戏互联网',

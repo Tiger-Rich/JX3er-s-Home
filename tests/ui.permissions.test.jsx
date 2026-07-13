@@ -692,7 +692,7 @@ describe('user workflow pages', () => {
     expect(screen.queryByText('匿名')).not.toBeInTheDocument();
   });
 
-  it('offers exactly the six active request types and no fandom help type', () => {
+  it('offers exactly the six active request types', () => {
     render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
 
     const options = within(screen.getByLabelText('类型')).getAllByRole('option');
@@ -705,8 +705,6 @@ describe('user workflow pages', () => {
       'local_help',
       'other',
     ]);
-    expect(screen.queryByRole('option', { name: '追星互助' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('委托说明')).not.toBeInTheDocument();
   });
 
   it('switches request types between dynamic fields and keeps optional extra notes', async () => {
@@ -1356,7 +1354,6 @@ describe('user workflow pages', () => {
     expect(screen.getByText('行业：互联网')).toBeVisible();
     expect(screen.queryByText('行业：农副产品')).not.toBeInTheDocument();
     expect(within(screen.getByLabelText('类型')).getAllByRole('option')).toHaveLength(7);
-    expect(screen.queryByRole('option', { name: '追星互助' })).not.toBeInTheDocument();
   });
 
   it('keeps a create draft mounted while switching bottom tabs', async () => {

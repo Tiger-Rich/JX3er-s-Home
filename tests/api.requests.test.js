@@ -425,9 +425,9 @@ describe('request, contact, and admin API', () => {
     },
   );
 
-  it('rejects retired fandom help publications', async () => {
+  it('rejects unknown request type publications', async () => {
     const response = await publish(users.qixiu, {
-      type: 'fandom_help',
+      type: 'boosting',
       details: validDetails('other'),
     });
 
