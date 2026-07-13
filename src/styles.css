@@ -534,6 +534,15 @@ textarea[readonly] {
   padding: 8px 10px;
 }
 
+.request-card-cover {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid rgba(220, 207, 190, 0.88);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
 .request-detail-page {
   display: grid;
   gap: 12px;
@@ -567,6 +576,63 @@ textarea[readonly] {
 .detail-item dd {
   margin: 0;
   font-weight: 600;
+}
+
+.typed-detail-grid,
+.request-image-grid,
+.admin-request-image-grid,
+.admin-detail-list {
+  display: grid;
+  gap: 10px;
+}
+
+.typed-detail-grid {
+  margin-top: 14px;
+}
+
+.typed-detail-row,
+.admin-detail-list p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.typed-detail-row {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(239, 226, 210, 0.42);
+  font-weight: 600;
+}
+
+.request-image-grid,
+.admin-request-image-grid {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  margin-top: 14px;
+}
+
+.admin-detail-list {
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(239, 226, 210, 0.36);
+}
+
+.admin-request-image-grid {
+  max-width: 360px;
+}
+
+.risk-notice {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(160, 67, 56, 0.26);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(250, 231, 227, 0.78);
+  color: var(--danger);
+}
+
+.risk-notice p {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .request-detail-actions,

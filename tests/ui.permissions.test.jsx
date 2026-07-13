@@ -640,6 +640,46 @@ describe('user workflow pages', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('收藏失败');
   });
 
+  it('renders typed request details, trade images, and risk notices before contact actions', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      request: {
+        id: 81,
+        type: 'trade',
+        title: '自家红薯礼盒',
+        description: '物品：自家红薯礼盒；价格：68元一箱。',
+        city: '杭州',
+        remote: false,
+        industry: null,
+        budgetOrReward: null,
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        details: {
+          itemName: '自家红薯礼盒',
+          price: '68元一箱',
+          condition: '5斤装',
+          deliveryMethod: '快递',
+        },
+        images: [
+          { id: 1, url: '/uploads/request-images/a.png', mimeType: 'image/png', sizeBytes: 12, sortOrder: 0 },
+        ],
+        owner: { nickname: '七秀同门', verificationStatus: 'approved' },
+      },
+    }));
+
+    render(<RequestDetailPage requestId={81} session={{ verificationStatus: 'approved' }} onBack={() => {}} />);
+
+    expect(await screen.findByRole('heading', { name: '自家红薯礼盒' })).toBeVisible();
+    expect(screen.getByText('物品/服务名称：自家红薯礼盒')).toBeVisible();
+    expect(screen.getByText('价格或交换方式：68元一箱')).toBeVisible();
+    expect(screen.getByLabelText('买卖交易图片')).toBeVisible();
+    expect(screen.getByAltText('自家红薯礼盒 图片 1')).toBeVisible();
+    expect(screen.getByText('请谨慎甄别委托信息，勿提前转账，谨防上当受骗。平台不提供交易担保。')).toBeVisible();
+    expect(screen.getByText('涉及定金、代付、私下链接、异常低价时请提高警惕。万事屋不提供交易担保或售后仲裁。')).toBeVisible();
+    expect(
+      screen.getByText('请谨慎甄别委托信息，勿提前转账，谨防上当受骗。平台不提供交易担保。')
+        .compareDocumentPosition(screen.getByLabelText('联系申请-给ta一个和你交换联系方式的理由')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it('shows publishing boundaries and disables unverified submission', () => {
     render(<CreateRequestPage session={{ verificationStatus: 'pending' }} />);
 
@@ -1277,6 +1317,48 @@ describe('user workflow pages', () => {
     });
   });
 
+  it('shows feed descriptions and covers while limiting industry summaries to referral and consulting types', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      requests: [
+        {
+          id: 51,
+          type: 'trade',
+          title: '自家红薯礼盒',
+          description: '物品：自家红薯礼盒；价格：68元一箱。',
+          createdAt: '2026-07-04T12:00:00.000Z',
+          expiresAt: '2030-01-01T00:00:00.000Z',
+          remote: false,
+          city: '杭州',
+          industry: '农副产品',
+          images: [{ id: 1, url: '/uploads/request-images/a.png' }],
+          owner: {},
+        },
+        {
+          id: 52,
+          type: 'job_referral',
+          title: '前端岗位内推',
+          description: '目标岗位：前端工程师。',
+          createdAt: '2026-07-03T12:00:00.000Z',
+          expiresAt: '2030-01-01T00:00:00.000Z',
+          remote: true,
+          city: null,
+          industry: '互联网',
+          owner: {},
+        },
+      ],
+    }));
+
+    render(<FeedPage onSelectRequest={() => {}} />);
+
+    expect(await screen.findByText('物品：自家红薯礼盒；价格：68元一箱。')).toBeVisible();
+    expect(screen.getByText('目标岗位：前端工程师。')).toBeVisible();
+    expect(screen.getByAltText('自家红薯礼盒 封面图')).toHaveClass('request-card-cover');
+    expect(screen.getByText('行业：互联网')).toBeVisible();
+    expect(screen.queryByText('行业：农副产品')).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('类型')).getAllByRole('option')).toHaveLength(7);
+    expect(screen.queryByRole('option', { name: '追星互助' })).not.toBeInTheDocument();
+  });
+
   it('keeps a create draft mounted while switching bottom tabs', async () => {
     fetch.mockImplementation((path) => {
       if (path === '/api/auth/me') {
@@ -1473,6 +1555,33 @@ describe('admin review pages', () => {
 
     const actionButtons = [...container.querySelectorAll('.admin-actions button')];
     expect(actionButtons.filter((button) => button.classList.contains('button-danger'))).toHaveLength(2);
+  });
+
+  it('renders admin typed detail summaries and trade image thumbnails', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      requests: [{
+        ...reviewedRequest,
+        id: 82,
+        type: 'trade',
+        title: '自家红薯礼盒',
+        description: '物品：自家红薯礼盒；价格：68元一箱。',
+        details: {
+          itemName: '自家红薯礼盒',
+          price: '68元一箱',
+          condition: '5斤装',
+          deliveryMethod: '快递',
+        },
+        images: [
+          { id: 1, url: '/uploads/request-images/a.png', mimeType: 'image/png', sizeBytes: 12, sortOrder: 0 },
+        ],
+      }],
+    }));
+
+    render(<AdminRequests />);
+
+    expect(await screen.findByText('物品/服务名称：自家红薯礼盒')).toBeVisible();
+    expect(screen.getByText('价格或交换方式：68元一箱')).toBeVisible();
+    expect(screen.getByAltText('委托 82 图片 1')).toBeVisible();
   });
 
   it.each([

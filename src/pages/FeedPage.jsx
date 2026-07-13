@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { requestTypes } from '../domain/constants.js';
 
 const priorityTypes = new Set(['job_referral', 'industry_consulting']);
+const industrySummaryTypes = new Set(['job_referral', 'industry_consulting']);
 
 function requestTypeLabel(value) {
   return requestTypes.find((type) => type.value === value)?.label ?? '其他';
@@ -84,10 +85,18 @@ export default function FeedPage({ onSelectRequest }) {
         <div className="request-list">
           {requests.map((request) => (
             <article className="request-card" key={request.id}>
+              {request.images?.[0] && (
+                <img
+                  className="request-card-cover"
+                  src={request.images[0].url}
+                  alt={`${request.title} 封面图`}
+                />
+              )}
               <p>{requestTypeLabel(request.type)}</p>
               <h3>{request.title}</h3>
+              {request.description && <p>{request.description}</p>}
               <p>{request.remote ? '可远程' : request.city || '城市未注明'}{request.remote && request.city ? ` · ${request.city}` : ''}</p>
-              {request.industry && <p>行业：{request.industry}</p>}
+              {request.industry && industrySummaryTypes.has(request.type) && <p>行业：{request.industry}</p>}
               <p>有效期至：{new Date(request.expiresAt).toLocaleString('zh-CN')}</p>
               <p>
                 发布者：{request.owner?.nickname || '未署名'}

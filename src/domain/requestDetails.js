@@ -62,3 +62,10 @@ export function validateDetails(type, details = {}) {
   }
   return '';
 }
+
+export function visibleDetailRows(type, details = {}) {
+  const source = details && typeof details === 'object' ? details : {};
+  return (requestDetailSchemas[type] ?? [])
+    .map((field) => ({ label: field.label, value: source[field.name] }))
+    .filter((row) => (typeof row.value === 'string' ? row.value.trim() : row.value));
+}

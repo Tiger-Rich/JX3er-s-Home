@@ -4,6 +4,7 @@ import { Check, Search, ShieldX, X } from 'lucide-react';
 import { api } from '../../api/client.js';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import { requestTypes } from '../../domain/constants.js';
+import { visibleDetailRows } from '../../domain/requestDetails.js';
 
 const emptyFilters = { status: '', type: '', city: '', industry: '', expired: '' };
 
@@ -169,9 +170,30 @@ export default function AdminRequests({ onSummaryChange }) {
             {items.map((item) => {
               const owner = item.owner ?? {};
               const typeLabel = requestTypes.find((type) => type.value === item.type)?.label ?? item.type;
+              const detailRows = visibleDetailRows(item.type, item.details);
               return (
                 <tr key={item.id}>
-                  <td>{item.title}<br />类型：{typeLabel}<br />{item.description}</td>
+                  <td>
+                    {item.title}<br />类型：{typeLabel}<br />{item.description}
+                    {detailRows.length > 0 && (
+                      <div className="admin-detail-list">
+                        {detailRows.map((row) => (
+                          <p key={row.label}>{row.label}：{row.value}</p>
+                        ))}
+                      </div>
+                    )}
+                    {item.type === 'trade' && item.images?.length > 0 && (
+                      <div className="admin-request-image-grid">
+                        {item.images.map((image, index) => (
+                          <img
+                            key={image.id ?? image.url}
+                            src={image.url}
+                            alt={`委托 ${item.id} 图片 ${index + 1}`}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td>城市：{item.city || '—'}<br />远程：{item.remote ? '是' : '否'}<br />行业：{item.industry || '—'}<br />预算或回报：{item.budgetOrReward || '—'}<br />有效期：{item.expiresAt || '—'}</td>
                   <td>{owner.nickname || '—'}<br />区服：{owner.server || '—'}<br />游戏昵称：{owner.gameNickname || '—'}<br />门派：{owner.sect || '—'}<br />入坑年份：{owner.startedYear || '—'}<br />城市：{owner.city || '—'}<br />行业：{owner.industry || '—'}<br />职业：{owner.occupation || '—'}<br /><StatusBadge type="verification" status={owner.verificationStatus} /></td>
                   <td><StatusBadge type="request" status={item.status} />{item.rejectReason && <><br />拒绝理由：{item.rejectReason}</>}{item.takedownReason && <><br />下架理由：{item.takedownReason}</>}</td>

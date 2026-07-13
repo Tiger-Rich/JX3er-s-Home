@@ -3,6 +3,7 @@ import { ArrowLeft, Bookmark, Flag, Send } from 'lucide-react';
 
 import { api } from '../api/client.js';
 import { requestTypes } from '../domain/constants.js';
+import { visibleDetailRows } from '../domain/requestDetails.js';
 
 function typeLabel(value) {
   return requestTypes.find((type) => type.value === value)?.label ?? '其他';
@@ -27,6 +28,7 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
   const isOwnRequest =
     state.request?.ownerId !== undefined &&
     session?.user?.id === state.request.ownerId;
+  const detailRows = state.request ? visibleDetailRows(state.request.type, state.request.details) : [];
 
   useEffect(() => {
     mountedRef.current = true;
@@ -119,6 +121,24 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
             <p className="eyebrow">{typeLabel(state.request.type)}</p>
             <h2 id="request-detail-title">{state.request.title}</h2>
             <p className="page-intro">{state.request.description}</p>
+            {detailRows.length > 0 && (
+              <div className="typed-detail-grid" aria-label="委托详情">
+                {detailRows.map((row) => (
+                  <p className="typed-detail-row" key={row.label}>{row.label}：{row.value}</p>
+                ))}
+              </div>
+            )}
+            {state.request.type === 'trade' && state.request.images?.length > 0 && (
+              <div className="request-image-grid" aria-label="买卖交易图片">
+                {state.request.images.map((image, index) => (
+                  <img
+                    key={image.id ?? image.url}
+                    src={image.url}
+                    alt={`${state.request.title} 图片 ${index + 1}`}
+                  />
+                ))}
+              </div>
+            )}
             <dl className="detail-grid">
               <div className="detail-item">
                 <dt>地点</dt>
@@ -153,6 +173,13 @@ export default function RequestDetailPage({ requestId, session, onBack }) {
             {state.request.owner?.city && <p>所在城市：{state.request.owner.city}</p>}
             {state.request.owner?.industry && <p>从事行业：{state.request.owner.industry}</p>}
             {state.request.owner?.verificationStatus === 'approved' && <p>已确认身份</p>}
+          </section>
+
+          <section className="risk-notice" aria-label="安全提醒">
+            <p>请谨慎甄别委托信息，勿提前转账，谨防上当受骗。平台不提供交易担保。</p>
+            {state.request.type === 'trade' && (
+              <p>涉及定金、代付、私下链接、异常低价时请提高警惕。万事屋不提供交易担保或售后仲裁。</p>
+            )}
           </section>
 
           <section className="detail-card">
