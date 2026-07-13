@@ -44,10 +44,20 @@ export function normalizeFeedQuery(query) {
   };
 }
 
+export function normalizeFeedTimestamp(value) {
+  if (typeof value !== 'string') return value;
+  const match = value.match(
+    /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?$/,
+  );
+  if (!match) return value;
+  const [, date, time, fractionalSeconds = ''] = match;
+  return `${date}T${time}.${fractionalSeconds.padEnd(3, '0')}Z`;
+}
+
 function freshnessScore(createdAt) {
   const ageHours = Math.max(
     0,
-    (Date.now() - new Date(createdAt).getTime()) / 36e5,
+    (Date.now() - new Date(normalizeFeedTimestamp(createdAt)).getTime()) / 36e5,
   );
   return Math.max(0, 24 - Math.min(ageHours, 168) / 7);
 }

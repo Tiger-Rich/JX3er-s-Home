@@ -29,7 +29,7 @@ export default function FeedPage({ onSelectRequest }) {
       if (value) params.set(key, value);
     }
     params.set('channel', channel);
-    params.set('sort', channel === 'latest' ? 'latest' : sort);
+    params.set('sort', sort);
     const query = params.toString();
     setState((current) => ({ ...current, loading: true, error: '' }));
     api(`/api/requests?${query}`, { signal: controller.signal })

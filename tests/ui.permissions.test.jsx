@@ -1312,6 +1312,37 @@ describe('user workflow pages', () => {
     });
   });
 
+  it('keeps Latest channel sort selection aligned with its effective query', async () => {
+    fetch.mockImplementation(() => Promise.resolve(jsonResponse({ requests: [] })));
+    const user = userEvent.setup();
+    render(<FeedPage onSelectRequest={() => {}} />);
+
+    await screen.findByRole('heading', { name: '万事广场' });
+    await user.click(within(screen.getByRole('group', { name: '万事广场频道' }))
+      .getByRole('button', { name: '最新' }));
+
+    const sorts = within(screen.getByRole('group', { name: '委托排序' }));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      '/api/requests?channel=latest&sort=recommended',
+      expect.any(Object),
+    ));
+    expect(sorts.getByRole('button', { name: '推荐' })).toHaveClass('button-primary');
+
+    await user.click(sorts.getByRole('button', { name: '最新' }));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      '/api/requests?channel=latest&sort=latest',
+      expect.any(Object),
+    ));
+    expect(sorts.getByRole('button', { name: '最新' })).toHaveClass('button-primary');
+
+    await user.click(sorts.getByRole('button', { name: '推荐' }));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      '/api/requests?channel=latest&sort=recommended',
+      expect.any(Object),
+    ));
+    expect(sorts.getByRole('button', { name: '推荐' })).toHaveClass('button-primary');
+  });
+
   it('renders feed channels, typed card facts, and heart counts without forbidden copy', async () => {
     fetch.mockResolvedValueOnce(jsonResponse({
       requests: [{
@@ -1416,11 +1447,41 @@ describe('user workflow pages', () => {
     const heart = await screen.findByRole('button', {
       name: '点亮心形：自家红薯礼盒，当前 1',
     });
-    fetch.mockRejectedValueOnce(new Error('network down'));
+    const postReaction = deferred();
+    fetch.mockReturnValueOnce(postReaction.promise);
     await user.click(heart);
 
-    expect(await screen.findByRole('button', {
+    expect(screen.getByRole('button', {
+      name: '取消心形：自家红薯礼盒，当前 2',
+    })).toBeDisabled();
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/requests/502/reaction',
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    await act(async () => postReaction.resolve(jsonResponse({
+      reactedByMe: true,
+      reactionCount: 2,
+    })));
+
+    const activeHeart = await screen.findByRole('button', {
+      name: '取消心形：自家红薯礼盒，当前 2',
+    });
+    const deleteReaction = deferred();
+    fetch.mockReturnValueOnce(deleteReaction.promise);
+    await user.click(activeHeart);
+
+    expect(screen.getByRole('button', {
       name: '点亮心形：自家红薯礼盒，当前 1',
+    })).toBeDisabled();
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/requests/502/reaction',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    await act(async () => deleteReaction.reject(new Error('network down')));
+
+    expect(await screen.findByRole('button', {
+      name: '取消心形：自家红薯礼盒，当前 2',
     })).toBeVisible();
     expect(await screen.findByRole('alert')).toHaveTextContent('network down');
   });

@@ -597,6 +597,38 @@ describe('request, contact, and admin API', () => {
     expect(JSON.stringify(response.body)).not.toContain('recommendationScore');
   });
 
+  it('does not let an owner self-heart outrank an otherwise identical request', async () => {
+    db.prepare('DELETE FROM request_reactions').run();
+    db.prepare('DELETE FROM requests').run();
+
+    const selfHeartId = insertRequest({
+      title: 'Owner heart only',
+      type: 'other',
+      ownerId: users.qixiu,
+    });
+    const neutralId = insertRequest({
+      title: 'No hearts',
+      type: 'other',
+      ownerId: users.wanhua,
+    });
+    db.prepare(
+      `UPDATE requests SET createdAt = '2026-07-14 00:00:00' WHERE id IN (?, ?)`,
+    ).run(selfHeartId, neutralId);
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(users.qixiu, selfHeartId);
+
+    const response = await request(app).get(
+      '/api/requests?channel=recommended&sort=recommended',
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.requests.map(({ id }) => id)).toEqual([
+      neutralId,
+      selfHeartId,
+    ]);
+  });
+
   it('returns a nearby metadata hint when the viewer city is unavailable', async () => {
     const anonymous = await request(app).get('/api/requests?channel=nearby');
     const viewer = await request(app)
