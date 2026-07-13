@@ -38,11 +38,29 @@ test('user browses feed channels and toggles a heart reaction', async ({ page })
 
   await expect(page.getByRole('heading', { name: '万事广场' })).toBeVisible();
   const channels = page.locator('.feed-channel-bar');
-  await channels.getByRole('button', { name: '最新' }).click();
-  await expect(page.locator('.request-list')).toBeVisible();
-  await channels.getByRole('button', { name: '推荐' }).click();
+  const latestChannel = channels.getByRole('button', { name: '最新' });
+  await Promise.all([
+    page.waitForResponse((response) =>
+      response.url().includes('/api/requests') &&
+      response.url().includes('channel=latest') &&
+      response.ok(),
+    ),
+    latestChannel.click(),
+  ]);
+  await expect(latestChannel).toHaveClass(/button-primary/);
 
-  const heart = page.getByRole('button', { name: /点亮心形|取消心形/ }).first();
+  const recommendedChannel = channels.getByRole('button', { name: '推荐' });
+  await Promise.all([
+    page.waitForResponse((response) =>
+      response.url().includes('/api/requests') &&
+      response.url().includes('channel=recommended') &&
+      response.ok(),
+    ),
+    recommendedChannel.click(),
+  ]);
+  await expect(recommendedChannel).toHaveClass(/button-primary/);
+
+  const heart = page.locator('.request-list').getByRole('button', { name: /点亮心形|取消心形/ }).first();
   await expect(heart).toBeVisible();
   const before = await heart.textContent();
   await heart.click();
