@@ -30,6 +30,26 @@ test('loads the seeded user shell after login', async ({ page }) => {
   await expect(page.getByText('匿名')).toHaveCount(0);
 });
 
+test('user browses feed channels and toggles a heart reaction', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('textbox', { name: '账号' }).fill('wanhua');
+  await page.getByLabel('密码').fill('test123');
+  await page.locator('form').getByRole('button', { name: '登录' }).click();
+
+  await expect(page.getByRole('heading', { name: '万事广场' })).toBeVisible();
+  const channels = page.locator('.feed-channel-bar');
+  await channels.getByRole('button', { name: '最新' }).click();
+  await expect(page.locator('.request-list')).toBeVisible();
+  await channels.getByRole('button', { name: '推荐' }).click();
+
+  const heart = page.getByRole('button', { name: /点亮心形|取消心形/ }).first();
+  await expect(heart).toBeVisible();
+  const before = await heart.textContent();
+  await heart.click();
+  await expect(heart).not.toHaveText(before ?? '');
+  await expect(page.getByText('点赞')).toHaveCount(0);
+});
+
 test('shows trade typed fields and image upload controls on the create page', async ({ page }) => {
   await page.goto('/');
 
