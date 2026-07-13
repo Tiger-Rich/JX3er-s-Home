@@ -1278,7 +1278,7 @@ describe('user workflow pages', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('处理申请失败');
   });
 
-  it('sorts priority request types first and sends encoded feed filters', async () => {
+  it('sends channel, sort, and encoded feed filters', async () => {
     const requests = [
       { id: 1, type: 'other', title: '最新普通委托', createdAt: '2026-07-03T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: false, city: '杭州', owner: {} },
       { id: 2, type: 'job_referral', title: '较早内推', createdAt: '2026-07-01T12:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z', remote: true, city: null, owner: {} },
@@ -1294,13 +1294,8 @@ describe('user workflow pages', () => {
     fetch.mockResolvedValue(jsonResponse({ requests }));
     render(<FeedPage onSelectRequest={() => {}} />);
 
-    const links = await screen.findAllByRole('button', { name: /查看委托/ });
-    expect(links.map((button) => button.textContent)).toEqual([
-      expect.stringContaining('较新咨询'),
-      expect.stringContaining('较早内推'),
-      expect.stringContaining('最新普通委托'),
-    ]);
-    expect(screen.getByText(/发布者：万花同门.*唯满侠.*万花.*2011.*成都.*互联网.*已确认身份/)).toBeVisible();
+    expect(await screen.findByRole('heading', { name: '万事广场' })).toBeVisible();
+    expect(screen.getAllByRole('button', { name: '查看委托' })).toHaveLength(3);
 
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'industry_consulting' } });
     fireEvent.change(screen.getByLabelText('城市'), { target: { value: '上海 浦东' } });
@@ -1309,20 +1304,135 @@ describe('user workflow pages', () => {
     await waitFor(() => {
       const lastUrl = fetch.mock.calls.at(-1)[0];
       expect(lastUrl).toContain('type=industry_consulting');
+      expect(lastUrl).toContain('channel=recommended');
+      expect(lastUrl).toContain('sort=recommended');
       expect(lastUrl).toContain('city=%E4%B8%8A%E6%B5%B7+%E6%B5%A6%E4%B8%9C');
       expect(lastUrl).toContain('industry=%E6%B8%B8%E6%88%8F%26%E4%BA%92%E8%81%94%E7%BD%91');
       expect(lastUrl).toContain('remote=true');
     });
   });
 
-  it('shows feed descriptions and covers while limiting industry summaries to referral and consulting types', async () => {
+  it('renders feed channels, typed card facts, and heart counts without forbidden copy', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      requests: [{
+        id: 501,
+        ownerId: 10,
+        type: 'job_referral',
+        title: '前端岗位内推',
+        details: {
+          targetRole: '前端工程师',
+          targetIndustry: '互联网',
+          helpWanted: '希望获得内推和简历建议',
+        },
+        city: '杭州',
+        remote: true,
+        industry: '互联网',
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        reactionCount: 7,
+        reactedByMe: false,
+        owner: {
+          nickname: '七秀同门',
+          server: '梦江南',
+          sect: '七秀',
+          city: '杭州',
+          verificationStatus: 'approved',
+        },
+      }],
+      meta: {},
+    }));
+
+    render(<FeedPage onSelectRequest={() => {}} />);
+
+    expect(await screen.findByRole('heading', { name: '万事广场' })).toBeVisible();
+    const channels = within(screen.getByRole('group', { name: '万事广场频道' }));
+    for (const channel of ['推荐', '最新', '同城', '求职内推', '行业咨询', '买卖交易']) {
+      expect(channels.getByRole('button', { name: channel })).toBeVisible();
+    }
+    expect(screen.getByText('目标岗位').parentElement).toHaveTextContent('目标岗位前端工程师');
+    expect(screen.getByText('目标行业').parentElement).toHaveTextContent('目标行业互联网');
+    expect(screen.getByText('杭州 / 可远程')).toBeVisible();
+    expect(screen.getByRole('button', { name: '点亮心形：前端岗位内推，当前 7' })).toBeVisible();
+    expect(screen.queryByText('点赞')).not.toBeInTheDocument();
+  });
+
+  it('requests channels and optimistically toggles heart state with rollback on failure', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        requests: [{
+          id: 502,
+          ownerId: 10,
+          type: 'trade',
+          title: '自家红薯礼盒',
+          details: {
+            price: '68 元一箱',
+            deliveryMethod: '快递',
+          },
+          images: [{ id: 1, url: '/uploads/request-images/a.png', sortOrder: 0 }],
+          city: '成都',
+          remote: false,
+          expiresAt: '2030-01-01T00:00:00.000Z',
+          reactionCount: 1,
+          reactedByMe: false,
+          owner: { nickname: '万花同门', verificationStatus: 'approved' },
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        requests: [],
+        meta: {},
+      }));
+    const user = userEvent.setup();
+
+    render(<FeedPage onSelectRequest={() => {}} />);
+
+    await user.click(await screen.findByRole('button', { name: '买卖交易' }));
+    await waitFor(() => expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/requests?channel=trade&sort=recommended',
+      expect.any(Object),
+    ));
+
+    await screen.findByText('暂时没有符合条件的委托。');
+
+    fetch.mockResolvedValueOnce(jsonResponse({
+      requests: [{
+        id: 502,
+        ownerId: 10,
+        type: 'trade',
+        title: '自家红薯礼盒',
+        details: {
+          price: '68 元一箱',
+          deliveryMethod: '快递',
+        },
+        images: [{ id: 1, url: '/uploads/request-images/a.png', sortOrder: 0 }],
+        city: '成都',
+        remote: false,
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        reactionCount: 1,
+        reactedByMe: false,
+        owner: { nickname: '万花同门', verificationStatus: 'approved' },
+      }],
+    }));
+    await user.click(within(screen.getByRole('group', { name: '万事广场频道' })).getByRole('button', { name: '推荐' }));
+    const heart = await screen.findByRole('button', {
+      name: '点亮心形：自家红薯礼盒，当前 1',
+    });
+    fetch.mockRejectedValueOnce(new Error('network down'));
+    await user.click(heart);
+
+    expect(await screen.findByRole('button', {
+      name: '点亮心形：自家红薯礼盒，当前 1',
+    })).toBeVisible();
+    expect(await screen.findByRole('alert')).toHaveTextContent('network down');
+  });
+
+  it('shows typed feed facts and covers', async () => {
     fetch.mockResolvedValueOnce(jsonResponse({
       requests: [
         {
           id: 51,
           type: 'trade',
           title: '自家红薯礼盒',
-          description: '物品：自家红薯礼盒；价格：68元一箱。',
+          details: { price: '68元一箱', deliveryMethod: '快递' },
           createdAt: '2026-07-04T12:00:00.000Z',
           expiresAt: '2030-01-01T00:00:00.000Z',
           remote: false,
@@ -1335,7 +1445,7 @@ describe('user workflow pages', () => {
           id: 52,
           type: 'job_referral',
           title: '前端岗位内推',
-          description: '目标岗位：前端工程师。',
+          details: { targetRole: '前端工程师' },
           createdAt: '2026-07-03T12:00:00.000Z',
           expiresAt: '2030-01-01T00:00:00.000Z',
           remote: true,
@@ -1348,10 +1458,10 @@ describe('user workflow pages', () => {
 
     render(<FeedPage onSelectRequest={() => {}} />);
 
-    expect(await screen.findByText('物品：自家红薯礼盒；价格：68元一箱。')).toBeVisible();
-    expect(screen.getByText('目标岗位：前端工程师。')).toBeVisible();
+    expect((await screen.findByText('价格/交换')).parentElement).toHaveTextContent('价格/交换68元一箱');
+    expect(screen.getByText('目标岗位').parentElement).toHaveTextContent('目标岗位前端工程师');
     expect(screen.getByAltText('自家红薯礼盒 封面图')).toHaveClass('request-card-cover');
-    expect(screen.getByText('行业：互联网')).toBeVisible();
+    expect(screen.getByText('目标行业').parentElement).toHaveTextContent('目标行业互联网');
     expect(screen.queryByText('行业：农副产品')).not.toBeInTheDocument();
     expect(within(screen.getByLabelText('类型')).getAllByRole('option')).toHaveLength(7);
   });
@@ -1890,7 +2000,11 @@ describe('App session flow', () => {
     });
     expect(getToken()).toBe('newest-token');
     expect(fetch).toHaveBeenCalledTimes(5);
-    expect(fetch).toHaveBeenNthCalledWith(5, '/api/requests', expect.any(Object));
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      '/api/requests?channel=recommended&sort=recommended',
+      expect.any(Object),
+    );
   });
 
   it('keeps the newest StrictMode refresh when an aborted request resolves out of order', async () => {
