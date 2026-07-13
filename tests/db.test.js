@@ -8,6 +8,7 @@ const expectedTables = [
   'profiles',
   'reports',
   'request_images',
+  'request_reactions',
   'requests',
   'users',
   'verifications',
