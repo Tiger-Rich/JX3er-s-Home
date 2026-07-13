@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { optionalUser, requireUser } from '../auth.js';
+import { normalizeFeedQuery, sortFeedRows } from '../feedDiscovery.js';
 import {
   REQUEST_TYPES,
   canApplyContact,
@@ -29,11 +30,37 @@ const REQUEST_COLUMNS = `
   p.industry AS ownerIndustry, p.occupation AS ownerOccupation,
   COALESCE(v.status, 'not_submitted') AS ownerVerificationStatus,
   COALESCE(rr.reactionCount, 0) AS reactionCount,
+  COALESCE(fr.favoriteCount, 0) AS favoriteCount,
+  COALESCE(ca.applicationCount, 0) AS applicationCount,
+  COALESCE(orx.ownerReactionCount, 0) AS ownerReactionCount,
   CASE WHEN ? IS NULL THEN 0 ELSE EXISTS (
     SELECT 1 FROM request_reactions mine
     WHERE mine.requestId = r.id AND mine.userId = ?
   ) END AS reactedByMe
 `;
+const FEED_AGGREGATE_JOINS = `
+       LEFT JOIN (
+         SELECT requestId, COUNT(*) AS reactionCount
+         FROM request_reactions
+         GROUP BY requestId
+       ) rr ON rr.requestId = r.id
+       LEFT JOIN (
+         SELECT requestId, COUNT(*) AS favoriteCount
+         FROM favorites
+         GROUP BY requestId
+       ) fr ON fr.requestId = r.id
+       LEFT JOIN (
+         SELECT requestId, COUNT(*) AS applicationCount
+         FROM contact_applications
+         GROUP BY requestId
+       ) ca ON ca.requestId = r.id
+       LEFT JOIN (
+         SELECT rr.requestId, COUNT(*) AS ownerReactionCount
+         FROM request_reactions rr
+         JOIN requests owned ON owned.id = rr.requestId
+         WHERE rr.userId = owned.ownerId
+         GROUP BY rr.requestId
+       ) orx ON orx.requestId = r.id`;
 const UTC_ISO_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
@@ -166,11 +193,7 @@ function publicRequestById(db, id, userId = null) {
        JOIN users u ON u.id = r.ownerId
        LEFT JOIN profiles p ON p.userId = u.id
        LEFT JOIN verifications v ON v.userId = u.id
-       LEFT JOIN (
-         SELECT requestId, COUNT(*) AS reactionCount
-         FROM request_reactions
-         GROUP BY requestId
-       ) rr ON rr.requestId = r.id
+       ${FEED_AGGREGATE_JOINS}
        WHERE r.id = ? AND r.status = 'approved' AND u.status = 'active'
          AND datetime(r.expiresAt) > datetime('now')`,
     )
@@ -214,12 +237,30 @@ export function createRequestsRouter(db) {
 
   router.get('/', optionalUser(db), (req, res, next) => {
     try {
+      const feedQuery = normalizeFeedQuery(req.query);
+      const meta = {};
       const clauses = [
         "r.status = 'approved'",
         "u.status = 'active'",
         "datetime(r.expiresAt) > datetime('now')",
       ];
       const values = [];
+      if (feedQuery.typeFromChannel) {
+        clauses.push('r.type = ?');
+        values.push(feedQuery.typeFromChannel);
+      }
+      if (feedQuery.channel === 'nearby') {
+        if (!req.user?.city) {
+          return res.json({
+            requests: [],
+            meta: { nearbyCityRequired: true },
+          });
+        }
+        clauses.push('r.city = ?');
+        values.push(req.user.city);
+        meta.nearbyCityRequired = false;
+        meta.nearbyCity = req.user.city;
+      }
       for (const field of ['type', 'city', 'industry']) {
         if (req.query[field] !== undefined) {
           if (typeof req.query[field] !== 'string' || !req.query[field].trim()) {
@@ -244,25 +285,26 @@ export function createRequestsRouter(db) {
            JOIN users u ON u.id = r.ownerId
            LEFT JOIN profiles p ON p.userId = u.id
            LEFT JOIN verifications v ON v.userId = u.id
-           LEFT JOIN (
-             SELECT requestId, COUNT(*) AS reactionCount
-             FROM request_reactions
-             GROUP BY requestId
-           ) rr ON rr.requestId = r.id
+           ${FEED_AGGREGATE_JOINS}
            WHERE ${clauses.join(' AND ')}
-           ORDER BY CASE WHEN r.type IN ('job_referral', 'industry_consulting')
-                         THEN 0 ELSE 1 END,
-                    datetime(r.createdAt) DESC, r.id DESC`,
+           ORDER BY datetime(r.createdAt) DESC, r.id DESC`,
         )
         .all(req.user?.id ?? null, req.user?.id ?? null, ...values);
       const imagesByRequestId = loadImagesForRequests(
         db,
         rows.map((row) => row.id),
       );
+      const sortedRows = sortFeedRows(rows, {
+        channel: feedQuery.channel,
+        sort: feedQuery.sort,
+        typeFromChannel: feedQuery.typeFromChannel,
+        viewer: req.user,
+      });
       return res.json({
-        requests: rows.map((row) =>
+        requests: sortedRows.map((row) =>
           requestDto({ ...row, images: imagesByRequestId.get(row.id) ?? [] }),
         ),
+        meta,
       });
     } catch (error) {
       return next(error);

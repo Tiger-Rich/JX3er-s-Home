@@ -477,7 +477,7 @@ describe('request, contact, and admin API', () => {
     expectNoKeys(detail.body);
   });
 
-  it('prioritizes referral and consulting requests before newest other types', async () => {
+  it('keeps referral and consulting visible in recommended sorting without hiding newest sorting', async () => {
     db.prepare('DELETE FROM requests').run();
     const otherId = insertRequest({ type: 'other', title: 'Newest other' });
     const consultingId = insertRequest({
@@ -498,14 +498,119 @@ describe('request, contact, and admin API', () => {
       `UPDATE requests SET createdAt = '2098-01-01 00:00:00' WHERE id = ?`,
     ).run(referralId);
 
-    const response = await request(app).get('/api/requests');
+    const recommended = await request(app).get('/api/requests');
+    const latest = await request(app).get('/api/requests?sort=latest');
 
-    expect(response.status).toBe(200);
-    expect(response.body.requests.map(({ id }) => id)).toEqual([
+    expect(recommended.status).toBe(200);
+    expect(recommended.body.requests.map(({ id }) => id).slice(0, 2)).toEqual([
+      referralId,
+      consultingId,
+    ]);
+    expect(latest.body.requests.map(({ id }) => id)).toEqual([
+      otherId,
       consultingId,
       referralId,
-      otherId,
     ]);
+  });
+
+  it('filters feed channels and supports latest ordering', async () => {
+    db.prepare('DELETE FROM requests').run();
+    const tradeId = insertRequest({ type: 'trade', title: 'Trade channel' });
+    const referralId = insertRequest({
+      type: 'job_referral',
+      title: 'Referral channel',
+    });
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-01 00:00:00' WHERE id = ?`,
+    ).run(tradeId);
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-02 00:00:00' WHERE id = ?`,
+    ).run(referralId);
+
+    const trade = await request(app).get('/api/requests?channel=trade');
+    const latest = await request(app).get('/api/requests?channel=latest&sort=latest');
+    const invalid = await request(app).get('/api/requests?channel=boosting');
+
+    expect(trade.status).toBe(200);
+    expect(trade.body.requests.map(({ id }) => id)).toEqual([tradeId]);
+    expect(latest.body.requests.map(({ id }) => id)).toEqual([
+      referralId,
+      tradeId,
+    ]);
+    expect(invalid.status).toBe(400);
+  });
+
+  it('uses reactions, favorites, applications, and self-heart exclusion in recommended ordering', async () => {
+    db.prepare('DELETE FROM contact_applications').run();
+    db.prepare('DELETE FROM favorites').run();
+    db.prepare('DELETE FROM request_reactions').run();
+    db.prepare('DELETE FROM requests').run();
+
+    const quietId = insertRequest({
+      title: 'Fresh quiet',
+      type: 'other',
+    });
+    const engagedId = insertRequest({
+      title: 'Engaged referral',
+      type: 'job_referral',
+    });
+    const selfHeartId = insertRequest({
+      title: 'Self heart only',
+      type: 'other',
+    });
+    const applicantId = insertUser({ account: 'ranking-applicant' });
+
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-03 00:00:00' WHERE id = ?`,
+    ).run(quietId);
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-02 00:00:00' WHERE id = ?`,
+    ).run(engagedId);
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-01 00:00:00' WHERE id = ?`,
+    ).run(selfHeartId);
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(users.wanhua, engagedId);
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(users.qixiu, selfHeartId);
+    db.prepare('INSERT INTO favorites (userId, requestId) VALUES (?, ?)').run(
+      users.wanhua,
+      engagedId,
+    );
+    db.prepare(
+      `INSERT INTO contact_applications
+         (requestId, applicantId, ownerId, message, status)
+       VALUES (?, ?, ?, 'Interested', 'pending')`,
+    ).run(engagedId, applicantId, users.qixiu);
+
+    const response = await request(app).get(
+      '/api/requests?channel=recommended&sort=recommended',
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.requests.map(({ id }) => id)[0]).toBe(engagedId);
+    expect(response.body.requests.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([quietId, selfHeartId]),
+    );
+    expect(JSON.stringify(response.body)).not.toContain('recommendationScore');
+  });
+
+  it('returns a nearby metadata hint when the viewer city is unavailable', async () => {
+    const anonymous = await request(app).get('/api/requests?channel=nearby');
+    const viewer = await request(app)
+      .get('/api/requests?channel=nearby')
+      .set(auth(users.qixiu));
+
+    expect(anonymous.status).toBe(200);
+    expect(anonymous.body.meta).toMatchObject({ nearbyCityRequired: true });
+    expect(anonymous.body.requests).toEqual([]);
+    expect(viewer.status).toBe(200);
+    expect(viewer.body.meta).toMatchObject({
+      nearbyCityRequired: false,
+      nearbyCity: expect.any(String),
+    });
   });
 
   it('reveals only the counterparty contact after owner approval', async () => {
