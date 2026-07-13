@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { requireUser } from '../auth.js';
+import { optionalUser, requireUser } from '../auth.js';
 import {
   REQUEST_TYPES,
   canApplyContact,
@@ -27,7 +27,12 @@ const REQUEST_COLUMNS = `
   p.server AS ownerServer, p.gameNickname AS ownerGameNickname,
   p.sect AS ownerSect, p.startedYear AS ownerStartedYear,
   p.industry AS ownerIndustry, p.occupation AS ownerOccupation,
-  COALESCE(v.status, 'not_submitted') AS ownerVerificationStatus
+  COALESCE(v.status, 'not_submitted') AS ownerVerificationStatus,
+  COALESCE(rr.reactionCount, 0) AS reactionCount,
+  CASE WHEN ? IS NULL THEN 0 ELSE EXISTS (
+    SELECT 1 FROM request_reactions mine
+    WHERE mine.requestId = r.id AND mine.userId = ?
+  ) END AS reactedByMe
 `;
 const UTC_ISO_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
@@ -134,6 +139,8 @@ function requestDto(row, includeOwner = true) {
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    reactionCount: Number(row.reactionCount ?? 0),
+    reactedByMe: Boolean(row.reactedByMe),
   };
   if (includeOwner) {
     result.owner = {
@@ -151,7 +158,7 @@ function requestDto(row, includeOwner = true) {
   return result;
 }
 
-function publicRequestById(db, id) {
+function publicRequestById(db, id, userId = null) {
   return db
     .prepare(
       `SELECT ${REQUEST_COLUMNS}
@@ -159,10 +166,33 @@ function publicRequestById(db, id) {
        JOIN users u ON u.id = r.ownerId
        LEFT JOIN profiles p ON p.userId = u.id
        LEFT JOIN verifications v ON v.userId = u.id
+       LEFT JOIN (
+         SELECT requestId, COUNT(*) AS reactionCount
+         FROM request_reactions
+         GROUP BY requestId
+       ) rr ON rr.requestId = r.id
        WHERE r.id = ? AND r.status = 'approved' AND u.status = 'active'
          AND datetime(r.expiresAt) > datetime('now')`,
     )
-    .get(id);
+    .get(userId, userId, id);
+}
+
+function reactionState(db, requestId, userId) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS reactionCount,
+              EXISTS (
+                SELECT 1 FROM request_reactions
+                WHERE requestId = ? AND userId = ?
+              ) AS reactedByMe
+       FROM request_reactions
+       WHERE requestId = ?`,
+    )
+    .get(requestId, userId, requestId);
+  return {
+    reactionCount: Number(row.reactionCount ?? 0),
+    reactedByMe: Boolean(row.reactedByMe),
+  };
 }
 
 function requireVerified(permission) {
@@ -182,7 +212,7 @@ export function createRequestsRouter(db) {
     return requestImageUpload(req, res, next);
   }
 
-  router.get('/', (req, res, next) => {
+  router.get('/', optionalUser(db), (req, res, next) => {
     try {
       const clauses = [
         "r.status = 'approved'",
@@ -214,12 +244,17 @@ export function createRequestsRouter(db) {
            JOIN users u ON u.id = r.ownerId
            LEFT JOIN profiles p ON p.userId = u.id
            LEFT JOIN verifications v ON v.userId = u.id
+           LEFT JOIN (
+             SELECT requestId, COUNT(*) AS reactionCount
+             FROM request_reactions
+             GROUP BY requestId
+           ) rr ON rr.requestId = r.id
            WHERE ${clauses.join(' AND ')}
            ORDER BY CASE WHEN r.type IN ('job_referral', 'industry_consulting')
                          THEN 0 ELSE 1 END,
                     datetime(r.createdAt) DESC, r.id DESC`,
         )
-        .all(...values);
+        .all(req.user?.id ?? null, req.user?.id ?? null, ...values);
       const imagesByRequestId = loadImagesForRequests(
         db,
         rows.map((row) => row.id),
@@ -234,9 +269,13 @@ export function createRequestsRouter(db) {
     }
   });
 
-  router.get('/:id', (req, res, next) => {
+  router.get('/:id', optionalUser(db), (req, res, next) => {
     try {
-      const row = publicRequestById(db, positiveId(req.params.id));
+      const row = publicRequestById(
+        db,
+        positiveId(req.params.id),
+        req.user?.id ?? null,
+      );
       if (!row) return res.status(404).json({ error: 'Request not found' });
       const images =
         loadImagesForRequests(db, [row.id]).get(row.id) ?? [];
@@ -327,6 +366,36 @@ export function createRequestsRouter(db) {
       }
     },
   );
+
+  router.post('/:id/reaction', requireUser(db), (req, res, next) => {
+    try {
+      const requestId = positiveId(req.params.id);
+      if (!publicRequestById(db, requestId, req.user.id)) {
+        return res.status(404).json({ error: 'Request not found' });
+      }
+      db.prepare(
+        'INSERT OR IGNORE INTO request_reactions (userId, requestId) VALUES (?, ?)',
+      ).run(req.user.id, requestId);
+      return res.json(reactionState(db, requestId, req.user.id));
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.delete('/:id/reaction', requireUser(db), (req, res, next) => {
+    try {
+      const requestId = positiveId(req.params.id);
+      if (!publicRequestById(db, requestId, req.user.id)) {
+        return res.status(404).json({ error: 'Request not found' });
+      }
+      db.prepare(
+        'DELETE FROM request_reactions WHERE userId = ? AND requestId = ?',
+      ).run(req.user.id, requestId);
+      return res.json(reactionState(db, requestId, req.user.id));
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   router.post(
     '/:id/favorite',

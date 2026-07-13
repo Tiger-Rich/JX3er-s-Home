@@ -27,6 +27,17 @@ function migrateDatabase(db) {
   if (!requestColumns.some(({ name }) => name === 'details')) {
     db.exec("ALTER TABLE requests ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS request_reactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER NOT NULL,
+      requestId INTEGER NOT NULL,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (userId, requestId),
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (requestId) REFERENCES requests(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 export function seedDatabase(db) {

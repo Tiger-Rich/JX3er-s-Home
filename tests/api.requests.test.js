@@ -715,6 +715,98 @@ describe('request, contact, and admin API', () => {
     ).toBe(1);
   });
 
+  it('exposes reaction counts and viewer reaction state on public list and detail', async () => {
+    const requestId = insertRequest({ title: 'Reaction target' });
+    const pendingId = insertUser({
+      account: 'pending-reaction',
+      verificationStatus: 'pending',
+    });
+
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(pendingId, requestId);
+
+    const anonymousList = await request(app).get('/api/requests');
+    const viewerList = await request(app)
+      .get('/api/requests')
+      .set(auth(pendingId));
+    const viewerDetail = await request(app)
+      .get(`/api/requests/${requestId}`)
+      .set(auth(pendingId));
+
+    expect(anonymousList.status).toBe(200);
+    expect(anonymousList.body.requests).toContainEqual(
+      expect.objectContaining({
+        id: requestId,
+        reactionCount: 1,
+        reactedByMe: false,
+      }),
+    );
+    expect(viewerList.body.requests).toContainEqual(
+      expect.objectContaining({
+        id: requestId,
+        reactionCount: 1,
+        reactedByMe: true,
+      }),
+    );
+    expect(viewerDetail.body.request).toMatchObject({
+      id: requestId,
+      reactionCount: 1,
+      reactedByMe: true,
+    });
+    expect(JSON.stringify(viewerList.body)).not.toContain('recommendationScore');
+  });
+
+  it('lets active unverified users toggle a heart reaction without duplicating rows', async () => {
+    const requestId = insertRequest();
+    const pendingId = insertUser({
+      account: 'unverified-heart',
+      verificationStatus: 'pending',
+    });
+
+    const anonymous = await request(app).post(`/api/requests/${requestId}/reaction`);
+    const first = await request(app)
+      .post(`/api/requests/${requestId}/reaction`)
+      .set(auth(pendingId));
+    const second = await request(app)
+      .post(`/api/requests/${requestId}/reaction`)
+      .set(auth(pendingId));
+    const removed = await request(app)
+      .delete(`/api/requests/${requestId}/reaction`)
+      .set(auth(pendingId));
+
+    expect(anonymous.status).toBe(401);
+    expect(first.body).toEqual({ reactionCount: 1, reactedByMe: true });
+    expect(second.body).toEqual({ reactionCount: 1, reactedByMe: true });
+    expect(removed.body).toEqual({ reactionCount: 0, reactedByMe: false });
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM request_reactions WHERE userId = ? AND requestId = ?',
+        )
+        .get(pendingId, requestId).count,
+    ).toBe(0);
+  });
+
+  it.each([
+    ['pending request', { status: 'pending', expiresAt: FUTURE }],
+    ['taken down request', { status: 'taken_down', expiresAt: FUTURE }],
+    ['expired request', { status: 'approved', expiresAt: PAST }],
+  ])('does not add a reaction to a hidden %s', async (_label, hidden) => {
+    const requestId = insertRequest(hidden);
+
+    const response = await request(app)
+      .post(`/api/requests/${requestId}/reaction`)
+      .set(auth(users.wanhua));
+
+    expect(response.status).toBe(404);
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM request_reactions WHERE requestId = ?')
+        .get(requestId).count,
+    ).toBe(0);
+  });
+
   it('creates bound pending reports for public requests and validates reason', async () => {
     const requestId = insertRequest();
     const blank = await request(app)

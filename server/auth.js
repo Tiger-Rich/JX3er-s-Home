@@ -87,3 +87,12 @@ export function requireUser(db) {
     return next();
   };
 }
+
+export function optionalUser(db) {
+  return (req, _res, next) => {
+    const userId = parseToken(req.get('authorization'));
+    const user = loadCurrentUser(db, userId);
+    req.user = user?.status === 'active' ? user : null;
+    return next();
+  };
+}
