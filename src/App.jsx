@@ -6,6 +6,7 @@ import ContactPage from './pages/ContactPage.jsx';
 import CreateRequestPage from './pages/CreateRequestPage.jsx';
 import FeedPage from './pages/FeedPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import MyRequestsPage from './pages/MyRequestsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import RequestDetailPage from './pages/RequestDetailPage.jsx';
 import AdminDashboard from './pages/admin/AdminDashboard.jsx';
@@ -16,6 +17,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('feed');
   const [visitedTabs, setVisitedTabs] = useState(() => new Set(['feed']));
   const [selectedRequestId, setSelectedRequestId] = useState(null);
+  const [editingRequestId, setEditingRequestId] = useState(null);
   const mountedRef = useRef(false);
   const authenticationOwnerRef = useRef({ controller: null, version: 0 });
   const refreshOwnerRef = useRef({ controller: null, version: 0 });
@@ -177,6 +179,15 @@ export default function App() {
       )}
       {visitedTabs.has('create') && (
         <div hidden={activeTab !== 'create'}><CreateRequestPage session={session} /></div>
+      )}
+      {visitedTabs.has('myRequests') && (
+        <div hidden={activeTab !== 'myRequests'}>
+          <MyRequestsPage
+            onSelectRequest={setSelectedRequestId}
+            onEditRequest={setEditingRequestId}
+            onCreateRequest={() => handleTabChange('create')}
+          />
+        </div>
       )}
       {visitedTabs.has('contacts') && (
         <div hidden={activeTab !== 'contacts'}><ContactPage /></div>

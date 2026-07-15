@@ -13,6 +13,7 @@ import ContactPage from '../src/pages/ContactPage.jsx';
 import CreateRequestPage from '../src/pages/CreateRequestPage.jsx';
 import FeedPage from '../src/pages/FeedPage.jsx';
 import LoginPage from '../src/pages/LoginPage.jsx';
+import MyRequestsPage from '../src/pages/MyRequestsPage.jsx';
 import ProfilePage from '../src/pages/ProfilePage.jsx';
 import RequestDetailPage from '../src/pages/RequestDetailPage.jsx';
 import AdminDashboard from '../src/pages/admin/AdminDashboard.jsx';
@@ -67,7 +68,7 @@ describe('application shells', () => {
     expect(screen.getByText('同在江湖，先看身份，再谈合作。')).toBeVisible();
     expect(screen.getByText('当前内容')).toBeVisible();
 
-    for (const label of ['万事广场', '发个委托', '联系申请', '我的名片']) {
+    for (const label of ['万事广场', '发个委托', '我的委托', '联系申请', '我的名片']) {
       expect(screen.getByRole('button', { name: label })).toBeVisible();
     }
     expect(screen.queryByText('我的番薯名片')).not.toBeInTheDocument();
@@ -122,6 +123,80 @@ describe('application shells', () => {
     for (const button of container.querySelectorAll('.admin-header button, .admin-navigation button')) {
       expect(button).toHaveClass('button-secondary');
     }
+  });
+});
+
+describe('MyRequestsPage', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lists owner requests and renders the available lifecycle action for each status', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      requests: [
+        {
+          id: 301,
+          type: 'other',
+          title: '待评审委托',
+          status: 'pending',
+          city: '杭州',
+          remote: false,
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          reactionCount: 1,
+          favoriteCount: 2,
+          applicationCount: 3,
+        },
+        {
+          id: 302,
+          type: 'other',
+          title: '已发布委托',
+          status: 'approved',
+          city: '上海',
+          remote: true,
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          reactionCount: 0,
+          favoriteCount: 0,
+          applicationCount: 0,
+        },
+      ],
+    }));
+
+    render(<MyRequestsPage onSelectRequest={vi.fn()} onEditRequest={vi.fn()} onCreateRequest={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', { name: '我的委托' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '撤回委托：待评审委托' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '关闭委托：已发布委托' })).toBeVisible();
+    expect(screen.getByText('联系申请 3')).toBeVisible();
+  });
+
+  it('withdraws, closes, and hides owner requests from the list', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        requests: [
+          { id: 401, type: 'other', title: '待审', status: 'pending', expiresAt: '2099-01-01T00:00:00.000Z' },
+          { id: 402, type: 'other', title: '发布中', status: 'approved', expiresAt: '2099-01-01T00:00:00.000Z' },
+          { id: 403, type: 'other', title: '已关闭', status: 'closed', expiresAt: '2099-01-01T00:00:00.000Z' },
+        ],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ request: { id: 401, title: '待审', status: 'withdrawn' } }))
+      .mockResolvedValueOnce(jsonResponse({ request: { id: 402, title: '发布中', status: 'closed' } }))
+      .mockResolvedValueOnce(jsonResponse({ hidden: true }));
+    const user = userEvent.setup();
+
+    render(<MyRequestsPage onSelectRequest={vi.fn()} onEditRequest={vi.fn()} onCreateRequest={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: '撤回委托：待审' }));
+    await user.click(screen.getByRole('button', { name: '关闭委托：发布中' }));
+    await user.click(screen.getByRole('button', { name: '删除委托：已关闭' }));
+
+    expect(fetch).toHaveBeenCalledWith('/api/my/requests/401/withdraw', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenCalledWith('/api/my/requests/402/close', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenCalledWith('/api/my/requests/403/hide', expect.objectContaining({ method: 'POST' }));
+    expect(screen.queryByRole('heading', { name: '已关闭' })).not.toBeInTheDocument();
   });
 });
 
