@@ -168,7 +168,7 @@ export default function RequestDetailPage({ requestId, session, onBack, mode = '
         <>
           <section className="owner-card" aria-labelledby="owner-title">
             <h3 id="owner-title">发布者名片</h3>
-            <p>{state.request.owner?.nickname || '未署名'}</p>
+            <p>{mode === 'owner' ? '我发布的委托' : state.request.owner?.nickname || '未署名'}</p>
             {state.request.owner?.server && <p>区服：{state.request.owner.server}</p>}
             {state.request.owner?.gameNickname && <p>游戏 ID/昵称：{state.request.owner.gameNickname}</p>}
             {state.request.owner?.sect && <p>门派：{state.request.owner.sect}</p>}
@@ -176,6 +176,8 @@ export default function RequestDetailPage({ requestId, session, onBack, mode = '
             {state.request.owner?.city && <p>所在城市：{state.request.owner.city}</p>}
             {state.request.owner?.industry && <p>从事行业：{state.request.owner.industry}</p>}
             {state.request.owner?.verificationStatus === 'approved' && <p>已确认身份</p>}
+            {state.request.rejectReason && <p>未通过原因：{state.request.rejectReason}</p>}
+            {state.request.takedownReason && <p>下架原因：{state.request.takedownReason}</p>}
           </section>
 
           <section className="risk-notice" aria-label="安全提醒">

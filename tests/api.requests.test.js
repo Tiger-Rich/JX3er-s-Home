@@ -1,10 +1,12 @@
 import request from 'supertest';
-import { rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../server/app.js';
 import { issueToken } from '../server/auth.js';
 import { createDatabase, seedDatabase } from '../server/db.js';
+import { REQUEST_IMAGE_DIRECTORY } from '../server/requestImages.js';
 
 const FUTURE = '2099-12-31T23:59:59.000Z';
 const PAST = '2020-01-01T00:00:00.000Z';
@@ -325,6 +327,39 @@ describe('request, contact, and admin API', () => {
     expect(illegal.status).toBe(409);
     expect(rejected.status).toBe(409);
   });
+
+  it.each([
+    ['rejected', 'active', 403],
+    ['approved', 'disabled', 401],
+  ])(
+    'does not let a %s and %s owner resubmit a withdrawn request',
+    async (verificationStatus, accountStatus, expectedStatus) => {
+      const ownerId = insertUser({
+        account: `resubmit-${verificationStatus}-${accountStatus}`,
+        verificationStatus,
+        status: accountStatus,
+      });
+      const withdrawnId = insertRequest({ ownerId, status: 'withdrawn' });
+
+      const response = await request(app)
+        .put(`/api/my/requests/${withdrawnId}`)
+        .set(auth(ownerId))
+        .send({
+          type: 'other',
+          title: 'Must remain withdrawn',
+          city: 'Hangzhou',
+          remote: false,
+          industry: 'Technology',
+          budgetOrReward: 'Coffee',
+          expiresAt: FUTURE,
+          details: validDetails('other'),
+        });
+
+      expect(response.status).toBe(expectedStatus);
+      expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(withdrawnId).status)
+        .toBe('withdrawn');
+    },
+  );
 
   it('rejects changing a withdrawn trade request with images to a non-trade type', async () => {
     const withdrawnId = insertRequest({ status: 'withdrawn', type: 'trade' });
@@ -1381,10 +1416,44 @@ describe('request, contact, and admin API', () => {
     expect(repeated.status).toBe(409);
   });
 
+  it.each(['not_submitted', 'rejected'])(
+    'does not let an admin approve a pending request for a %s owner',
+    async (verificationStatus) => {
+      const ownerId = insertUser({
+        account: `unverified-owner-${verificationStatus}`,
+        verificationStatus,
+      });
+      const requestId = insertRequest({ ownerId, status: 'pending' });
+
+      const response = await request(app)
+        .post(`/api/admin/requests/${requestId}/approve`)
+        .set(auth(users.admin));
+
+      expect(response.status).toBe(409);
+      expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(requestId).status)
+        .toBe('pending');
+    },
+  );
+
   it('lets admins hard delete requests and cascades request-owned records', async () => {
     const requestId = insertRequest({ status: 'closed', title: 'Delete me' });
     db.prepare('INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)').run(users.wanhua, requestId);
     db.prepare('INSERT INTO favorites (userId, requestId) VALUES (?, ?)').run(users.wanhua, requestId);
+    db.prepare(
+      `INSERT INTO contact_applications (requestId, applicantId, ownerId, message)
+       VALUES (?, ?, ?, 'Interested')`,
+    ).run(requestId, users.wanhua, users.qixiu);
+    db.prepare(
+      `INSERT INTO reports (reporterId, targetType, targetId, reason)
+       VALUES (?, 'request', ?, 'Delete target report')`,
+    ).run(users.wanhua, requestId);
+    const imageFilename = 'delete-me.png';
+    mkdirSync(REQUEST_IMAGE_DIRECTORY, { recursive: true });
+    writeFileSync(path.join(REQUEST_IMAGE_DIRECTORY, imageFilename), 'image bytes');
+    db.prepare(
+      `INSERT INTO request_images (requestId, url, mimeType, sizeBytes, sortOrder)
+       VALUES (?, ?, 'image/png', 11, 0)`,
+    ).run(requestId, `/uploads/request-images/${imageFilename}`);
 
     const nonAdmin = await request(app)
       .delete(`/api/admin/requests/${requestId}`)
@@ -1402,6 +1471,10 @@ describe('request, contact, and admin API', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM requests WHERE id = ?').get(requestId).count).toBe(0);
     expect(db.prepare('SELECT COUNT(*) AS count FROM favorites WHERE requestId = ?').get(requestId).count).toBe(0);
     expect(db.prepare('SELECT COUNT(*) AS count FROM request_reactions WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM contact_applications WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM request_images WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM reports WHERE targetType = 'request' AND targetId = ?").get(requestId).count).toBe(0);
+    expect(existsSync(path.join(REQUEST_IMAGE_DIRECTORY, imageFilename))).toBe(false);
   });
 
   it.each([

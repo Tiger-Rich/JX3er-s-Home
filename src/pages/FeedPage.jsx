@@ -14,7 +14,7 @@ function requestTypeLabel(value) {
   return requestTypes.find((type) => type.value === value)?.label ?? '其他';
 }
 
-export default function FeedPage({ onSelectRequest }) {
+export default function FeedPage({ onSelectRequest, refreshKey = 0 }) {
   const [filters, setFilters] = useState({ type: '', city: '', industry: '', remote: '' });
   const [state, setState] = useState({ loading: true, error: '', requests: [] });
   const [channel, setChannel] = useState('recommended');
@@ -40,7 +40,7 @@ export default function FeedPage({ onSelectRequest }) {
         }
       });
     return () => controller.abort();
-  }, [channel, filters, sort]);
+  }, [channel, filters, refreshKey, sort]);
 
   function updateFilter(event) {
     const { name, value } = event.target;

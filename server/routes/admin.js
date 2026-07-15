@@ -8,7 +8,7 @@ import {
   isAdmin,
 } from '../domain.js';
 import { parseRequestDetails } from '../requestDetails.js';
-import { loadImagesForRequests } from '../requestImages.js';
+import { deleteRequestImageFiles, loadImagesForRequests } from '../requestImages.js';
 
 function clientError(status, message) {
   const error = new Error(message);
@@ -295,6 +295,11 @@ export function createAdminRouter(db) {
                  SELECT 1 FROM users owner
                  WHERE owner.id = requests.ownerId
                    AND owner.status = 'active'
+               )
+               AND EXISTS (
+                 SELECT 1 FROM verifications ownerVerification
+                 WHERE ownerVerification.userId = requests.ownerId
+                   AND ownerVerification.status = 'approved'
                )`
             : '';
         const update = db
@@ -334,10 +339,15 @@ export function createAdminRouter(db) {
   router.delete('/requests/:id', (req, res, next) => {
     try {
       const id = positiveId(req.params.id);
-      const result = db.prepare('DELETE FROM requests WHERE id = ?').run(id);
-      if (result.changes === 0) {
+      const existing = db.prepare('SELECT id FROM requests WHERE id = ?').get(id);
+      if (!existing) {
         return res.status(404).json({ error: 'Request not found' });
       }
+      deleteRequestImageFiles(db, id);
+      db.transaction((requestId) => {
+        db.prepare("DELETE FROM reports WHERE targetType = 'request' AND targetId = ?").run(requestId);
+        db.prepare('DELETE FROM requests WHERE id = ?').run(requestId);
+      })(id);
       return res.json({ deleted: true });
     } catch (error) {
       return next(error);

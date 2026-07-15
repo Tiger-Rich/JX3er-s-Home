@@ -18,6 +18,7 @@ export default function App() {
   const [visitedTabs, setVisitedTabs] = useState(() => new Set(['feed']));
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [editingRequestId, setEditingRequestId] = useState(null);
+  const [feedRefreshKey, setFeedRefreshKey] = useState(0);
   const [myRequestsRefreshKey, setMyRequestsRefreshKey] = useState(0);
   const mountedRef = useRef(false);
   const authenticationOwnerRef = useRef({ controller: null, version: 0 });
@@ -128,6 +129,9 @@ export default function App() {
   }
 
   function handleTabChange(tab) {
+    if (tab === 'myRequests' && activeTab !== 'myRequests') {
+      setMyRequestsRefreshKey((current) => current + 1);
+    }
     setActiveTab(tab);
     setVisitedTabs((current) => {
       if (current.has(tab)) return current;
@@ -148,6 +152,13 @@ export default function App() {
   function handleMyRequestSelect(requestId) {
     setSelectedRequest({ id: requestId, source: 'owner' });
     handleTabChange('feed');
+  }
+
+  function invalidateFeed() {
+    setFeedRefreshKey((current) => current + 1);
+    setSelectedRequest((current) => (
+      current?.source === 'public' ? null : current
+    ));
   }
 
   if (session === undefined) {
@@ -196,7 +207,10 @@ export default function App() {
               onBack={() => setSelectedRequest(null)}
             />
           ) : (
-            <FeedPage onSelectRequest={handleRequestSelect} />
+            <FeedPage
+              refreshKey={feedRefreshKey}
+              onSelectRequest={handleRequestSelect}
+            />
           )}
         </div>
       )}
@@ -208,6 +222,7 @@ export default function App() {
             onEditComplete={() => {
               setEditingRequestId(null);
               setMyRequestsRefreshKey((current) => current + 1);
+              invalidateFeed();
               handleTabChange('myRequests');
             }}
           />
@@ -219,6 +234,7 @@ export default function App() {
             refreshKey={myRequestsRefreshKey}
             onSelectRequest={handleMyRequestSelect}
             onCreateRequest={openCreateRequest}
+            onPublicVisibilityChange={invalidateFeed}
             onEditRequest={(requestId) => {
               setEditingRequestId(requestId);
               handleTabChange('create');

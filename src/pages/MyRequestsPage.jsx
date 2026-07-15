@@ -16,7 +16,13 @@ function locationLabel(request) {
   return request.city || '未标注城市';
 }
 
-export default function MyRequestsPage({ refreshKey, onSelectRequest, onEditRequest, onCreateRequest }) {
+export default function MyRequestsPage({
+  refreshKey,
+  onSelectRequest,
+  onEditRequest,
+  onCreateRequest,
+  onPublicVisibilityChange,
+}) {
   const [filter, setFilter] = useState('');
   const [state, setState] = useState({ loading: true, error: '', requests: [] });
   const [busyId, setBusyId] = useState(null);
@@ -87,17 +93,21 @@ export default function MyRequestsPage({ refreshKey, onSelectRequest, onEditRequ
         }));
         setFeedback({ type: 'success', message: '委托已从我的列表中删除。' });
       } else {
+        const nextRequest = { ...request, ...result.request };
         setState((current) => ({
           ...current,
-          requests: current.requests.map((item) => (
-            item.id === request.id ? { ...item, ...result.request } : item
-          )),
+          requests: filter && nextRequest.status !== filter
+            ? current.requests.filter((item) => item.id !== request.id)
+            : current.requests.map((item) => (
+              item.id === request.id ? nextRequest : item
+            )),
         }));
         setFeedback({
           type: 'success',
           message: action === 'withdraw' ? '委托已撤回。' : '委托已关闭。',
         });
       }
+      onPublicVisibilityChange?.();
     } catch (error) {
       if (!mountedRef.current || owner.version !== mutationId || error.name === 'AbortError') return;
       setFeedback({ type: 'error', message: error.message || '暂时无法完成操作' });

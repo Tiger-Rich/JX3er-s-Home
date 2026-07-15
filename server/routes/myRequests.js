@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { requireUser } from '../auth.js';
-import { REQUEST_STATUSES } from '../domain.js';
+import { canPublishRequest, REQUEST_STATUSES } from '../domain.js';
 import { buildRequestValuesFromBody } from '../requestPayload.js';
 import { parseRequestDetails } from '../requestDetails.js';
 import { loadImagesForRequests } from '../requestImages.js';
@@ -18,6 +18,13 @@ function positiveId(value) {
   const id = Number(value);
   if (!Number.isSafeInteger(id)) throw clientError(400, 'Invalid ID');
   return id;
+}
+
+function requirePublishEligibility(req, res, next) {
+  if (!canPublishRequest(req.user)) {
+    return res.status(403).json({ error: 'Approved verification required' });
+  }
+  return next();
 }
 
 const MY_REQUEST_QUERY = `
@@ -174,7 +181,7 @@ export function createMyRequestsRouter(db) {
     `,
   }));
 
-  router.put('/:id', (req, res, next) => {
+  router.put('/:id', requirePublishEligibility, (req, res, next) => {
     try {
       const id = positiveId(req.params.id);
       const ownedRequest = loadOwnedRequest(db, id, req.user.id);

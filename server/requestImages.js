@@ -126,3 +126,15 @@ export function loadImagesForRequests(db, requestIds) {
   }
   return imagesByRequestId;
 }
+
+export function deleteRequestImageFiles(db, requestId) {
+  const images = loadImagesForRequests(db, [requestId]).get(requestId) ?? [];
+  for (const image of images) {
+    const routePrefix = `${REQUEST_IMAGE_ROUTE}/`;
+    if (!image.url.startsWith(routePrefix)) continue;
+    const filename = image.url.slice(routePrefix.length);
+    const filePath = path.resolve(REQUEST_IMAGE_DIRECTORY, filename);
+    if (path.dirname(filePath) !== REQUEST_IMAGE_DIRECTORY) continue;
+    fs.rmSync(filePath, { force: true });
+  }
+}

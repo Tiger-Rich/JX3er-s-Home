@@ -220,6 +220,34 @@ describe('MyRequestsPage', () => {
     expect(screen.queryByRole('button', { name: '删除委托：已关闭' })).not.toBeInTheDocument();
   });
 
+  it('removes a withdrawn request from an active pending filter', async () => {
+    const pendingRequest = {
+      id: 404,
+      type: 'other',
+      title: 'Pending filter item',
+      status: 'pending',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    };
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ requests: [pendingRequest] }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [pendingRequest] }))
+      .mockResolvedValueOnce(jsonResponse({
+        request: { ...pendingRequest, status: 'withdrawn' },
+      }));
+    const user = userEvent.setup();
+
+    render(<MyRequestsPage onSelectRequest={vi.fn()} onEditRequest={vi.fn()} onCreateRequest={vi.fn()} />);
+
+    await screen.findByRole('button', { name: '撤回委托：Pending filter item' });
+    await user.click(screen.getByRole('button', { name: '待评审' }));
+    await screen.findByRole('button', { name: '撤回委托：Pending filter item' });
+    await user.click(screen.getByRole('button', { name: '撤回委托：Pending filter item' }));
+
+    await waitFor(() => expect(
+      screen.queryByRole('heading', { name: 'Pending filter item' }),
+    ).not.toBeInTheDocument());
+  });
+
   it('opens closed and withdrawn request details through the owner endpoint', async () => {
     setToken(null);
     fetch.mockImplementation((path) => {
@@ -811,6 +839,43 @@ describe('user workflow pages', () => {
     expect(screen.getByText('这是你发布的委托，其他番薯递出联系申请后会在联系申请里出现。')).toBeVisible();
     expect(screen.queryByLabelText('联系申请-给ta一个和你交换联系方式的理由')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '递出联系申请' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['closed', 'takedownReason', 'Already closed by owner', '下架原因：Already closed by owner'],
+    ['withdrawn', 'rejectReason', 'Needs clearer details', '未通过原因：Needs clearer details'],
+  ])('labels %s owner-only details without an unsigned owner fallback', async (
+    status,
+    reasonKey,
+    reason,
+    reasonText,
+  ) => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      request: {
+        id: 14,
+        ownerId: 7,
+        type: 'other',
+        title: `${status} owner request`,
+        description: 'Owner-only details remain readable.',
+        status,
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        [reasonKey]: reason,
+      },
+    }));
+
+    render(
+      <RequestDetailPage
+        requestId={14}
+        mode="owner"
+        session={{ user: { id: 7 }, verificationStatus: 'approved' }}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: `${status} owner request` })).toBeVisible();
+    expect(screen.getByText('我发布的委托')).toBeVisible();
+    expect(screen.getByText(reasonText)).toBeVisible();
+    expect(screen.queryByText('未署名')).not.toBeInTheDocument();
   });
 
   it('posts detail actions with their required bodies and calls the back handler', async () => {
@@ -2423,6 +2488,91 @@ describe('App session flow', () => {
 
     expect(await screen.findByRole('button', { name: visible })).toBeVisible();
     expect(screen.queryByRole('button', { name: absent })).not.toBeInTheDocument();
+  });
+
+  it('refreshes my requests when returning to the tab', async () => {
+    let ownerListCalls = 0;
+    fetch.mockImplementation((path) => {
+      if (path === '/api/auth/me') {
+        return Promise.resolve(jsonResponse({
+          user: { id: 9, role: 'user', nickname: '七秀' },
+          verificationStatus: 'approved',
+        }));
+      }
+      if (path === '/api/requests?channel=recommended&sort=recommended') {
+        return Promise.resolve(jsonResponse({ requests: [] }));
+      }
+      if (path === '/api/my/requests') {
+        ownerListCalls += 1;
+        return Promise.resolve(jsonResponse({
+          requests: [{
+            id: 905,
+            type: 'other',
+            title: ownerListCalls === 1 ? 'Original owner state' : 'Updated owner state',
+            status: ownerListCalls === 1 ? 'pending' : 'closed',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          }],
+        }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '我的委托' }));
+    expect(await screen.findByRole('heading', { name: 'Original owner state' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '万事广场' }));
+    await user.click(screen.getByRole('button', { name: '我的委托' }));
+
+    expect(await screen.findByRole('heading', { name: 'Updated owner state' })).toBeVisible();
+    expect(ownerListCalls).toBe(2);
+  });
+
+  it('invalidates the kept-alive feed after an owner closes an approved request', async () => {
+    const publicRequest = {
+      id: 906,
+      type: 'other',
+      title: 'Visible until closed',
+      status: 'approved',
+      city: 'Hangzhou',
+      remote: false,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      owner: { nickname: '七秀', verificationStatus: 'approved' },
+    };
+    let feedCalls = 0;
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/auth/me') {
+        return Promise.resolve(jsonResponse({
+          user: { id: 9, role: 'user', nickname: '七秀' },
+          verificationStatus: 'approved',
+        }));
+      }
+      if (path === '/api/requests?channel=recommended&sort=recommended') {
+        feedCalls += 1;
+        return Promise.resolve(jsonResponse({ requests: feedCalls === 1 ? [publicRequest] : [] }));
+      }
+      if (path === '/api/my/requests') {
+        return Promise.resolve(jsonResponse({ requests: [publicRequest] }));
+      }
+      if (path === '/api/my/requests/906/close' && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({
+          request: { ...publicRequest, status: 'closed' },
+        }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Visible until closed' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '我的委托' }));
+    await user.click(await screen.findByRole('button', { name: '关闭委托：Visible until closed' }));
+    await waitFor(() => expect(feedCalls).toBe(2));
+    await user.click(screen.getByRole('button', { name: '万事广场' }));
+
+    expect(screen.queryByRole('heading', { name: 'Visible until closed' })).not.toBeInTheDocument();
   });
 
   it('saves a login token, refreshes the session, and clears it on logout', async () => {
