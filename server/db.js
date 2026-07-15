@@ -264,7 +264,7 @@ export function seedDatabase(db) {
         expiresAt,
         status
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved'
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM requests WHERE ownerId = ? AND title = ?
       )
@@ -284,8 +284,77 @@ export function seedDatabase(db) {
       '游戏互联网',
       '一杯咖啡或等值感谢',
       '2027-06-30 23:59:59',
+      'approved',
       qixiuId,
       '想了解游戏行业产品岗位的日常',
+    );
+
+    db.prepare(`
+      INSERT INTO requests (
+        ownerId,
+        type,
+        title,
+        description,
+        details,
+        city,
+        remote,
+        industry,
+        budgetOrReward,
+        expiresAt,
+        status
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM requests WHERE ownerId = ? AND title = ?
+      )
+    `).run(
+      qixiuId,
+      'other',
+      '待撤回的种子委托',
+      '用于演示委托撤回和重新提交的本地种子数据。',
+      JSON.stringify({ note: 'E2E pending request' }),
+      '杭州',
+      1,
+      '游戏互联网',
+      '一杯咖啡或等值感谢',
+      '2027-06-30 23:59:59',
+      'pending',
+      qixiuId,
+      '待撤回的种子委托',
+    );
+
+    db.prepare(`
+      INSERT INTO requests (
+        ownerId,
+        type,
+        title,
+        description,
+        details,
+        city,
+        remote,
+        industry,
+        budgetOrReward,
+        expiresAt,
+        status
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM requests WHERE ownerId = ? AND title = ?
+      )
+    `).run(
+      qixiuId,
+      'other',
+      '待关闭的种子委托',
+      '用于演示委托关闭和从列表中隐藏的本地种子数据。',
+      JSON.stringify({ note: 'E2E approved request' }),
+      '杭州',
+      1,
+      '游戏互联网',
+      '一杯咖啡或等值感谢',
+      '2027-06-30 23:59:59',
+      'approved',
+      qixiuId,
+      '待关闭的种子委托',
     );
   });
 

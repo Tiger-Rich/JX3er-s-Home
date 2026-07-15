@@ -71,6 +71,8 @@ describe('domain constants', () => {
       rejected: '未通过',
       taken_down: '已下架',
       expired: '已过期',
+      withdrawn: '已撤回',
+      closed: '已关闭',
     });
     expect(applicationStatusLabels).toEqual({
       pending: '待确认',

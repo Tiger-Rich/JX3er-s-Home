@@ -30,6 +30,30 @@ test('loads the seeded user shell after login', async ({ page }) => {
   await expect(page.getByText('匿名')).toHaveCount(0);
 });
 
+test('user manages pending and approved requests from my requests', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[name="account"]').fill('qixiu');
+  await page.locator('input[name="password"]').fill('test123');
+  await page.locator('form').getByRole('button', { name: '登录' }).click();
+
+  await page.locator('.bottom-navigation').getByRole('button', { name: '我的委托' }).click();
+  await expect(page.getByRole('heading', { name: '我的委托' })).toBeVisible();
+
+  const pendingTitle = '待撤回的种子委托';
+  const pendingCard = page.locator('.my-request-card').filter({ hasText: pendingTitle });
+  await expect(pendingCard).toBeVisible();
+  await pendingCard.getByRole('button', { name: `撤回委托：${pendingTitle}` }).click();
+  await expect(pendingCard.getByText('已撤回', { exact: true })).toBeVisible();
+  await expect(pendingCard.getByRole('button', { name: `编辑委托：${pendingTitle}` })).toBeVisible();
+
+  const approvedTitle = '待关闭的种子委托';
+  const approvedCard = page.locator('.my-request-card').filter({ hasText: approvedTitle });
+  await approvedCard.getByRole('button', { name: `关闭委托：${approvedTitle}` }).click();
+  await expect(approvedCard.getByText('已关闭', { exact: true })).toBeVisible();
+  await approvedCard.getByRole('button', { name: `删除委托：${approvedTitle}` }).click();
+  await expect(approvedCard).toHaveCount(0);
+});
+
 test('user browses feed channels and toggles a heart reaction', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('textbox', { name: '账号' }).fill('wanhua');
