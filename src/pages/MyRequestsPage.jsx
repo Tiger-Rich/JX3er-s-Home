@@ -16,7 +16,7 @@ function locationLabel(request) {
   return request.city || '未标注城市';
 }
 
-export default function MyRequestsPage({ onSelectRequest, onEditRequest, onCreateRequest }) {
+export default function MyRequestsPage({ refreshKey, onSelectRequest, onEditRequest, onCreateRequest }) {
   const [filter, setFilter] = useState('');
   const [state, setState] = useState({ loading: true, error: '', requests: [] });
   const [busyId, setBusyId] = useState(null);
@@ -60,7 +60,7 @@ export default function MyRequestsPage({ onSelectRequest, onEditRequest, onCreat
       mutationOwner.controller?.abort();
       mutationOwner.controller = null;
     };
-  }, [filter, loadRequests]);
+  }, [filter, loadRequests, refreshKey]);
 
   async function runAction(request, action) {
     const owner = mutationOwnerRef.current;

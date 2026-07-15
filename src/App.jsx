@@ -18,6 +18,7 @@ export default function App() {
   const [visitedTabs, setVisitedTabs] = useState(() => new Set(['feed']));
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [editingRequestId, setEditingRequestId] = useState(null);
+  const [myRequestsRefreshKey, setMyRequestsRefreshKey] = useState(0);
   const mountedRef = useRef(false);
   const authenticationOwnerRef = useRef({ controller: null, version: 0 });
   const refreshOwnerRef = useRef({ controller: null, version: 0 });
@@ -195,6 +196,7 @@ export default function App() {
             editRequestId={editingRequestId}
             onEditComplete={() => {
               setEditingRequestId(null);
+              setMyRequestsRefreshKey((current) => current + 1);
               handleTabChange('myRequests');
             }}
           />
@@ -203,6 +205,7 @@ export default function App() {
       {visitedTabs.has('myRequests') && (
         <div hidden={activeTab !== 'myRequests'}>
           <MyRequestsPage
+            refreshKey={myRequestsRefreshKey}
             onSelectRequest={handleMyRequestSelect}
             onCreateRequest={() => {
               setEditingRequestId(null);

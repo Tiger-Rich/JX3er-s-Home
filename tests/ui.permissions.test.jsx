@@ -300,6 +300,78 @@ describe('MyRequestsPage', () => {
     expect(screen.queryByRole('button', { name: '递出联系申请' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '收藏委托' })).not.toBeInTheDocument();
   });
+
+  it('reloads my requests as pending after a withdrawn request is edited and resubmitted', async () => {
+    setToken(null);
+    let ownerListCalls = 0;
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/auth/me') {
+        return Promise.resolve(jsonResponse({
+          user: { id: 9, role: 'user', nickname: '七秀' },
+          verificationStatus: 'approved',
+        }));
+      }
+      if (path === '/api/requests?channel=recommended&sort=recommended') {
+        return Promise.resolve(jsonResponse({ requests: [] }));
+      }
+      if (path === '/api/my/requests') {
+        ownerListCalls += 1;
+        return Promise.resolve(jsonResponse({
+          requests: [{
+            id: 701,
+            type: 'other',
+            title: '重提交后应刷新',
+            status: ownerListCalls === 1 ? 'withdrawn' : 'pending',
+            city: '杭州',
+            remote: false,
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            details: {
+              requestKind: '找同门',
+              helpWanted: '一起做作品集',
+              reward: '互相练习',
+            },
+          }],
+        }));
+      }
+      if (path === '/api/my/requests/701' && options.method === 'PUT') {
+        return Promise.resolve(jsonResponse({ request: { id: 701, status: 'pending' } }));
+      }
+      if (path === '/api/my/requests/701') {
+        return Promise.resolve(jsonResponse({
+          request: {
+            id: 701,
+            type: 'other',
+            title: '重提交后应刷新',
+            status: 'withdrawn',
+            city: '杭州',
+            remote: false,
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            details: {
+              requestKind: '找同门',
+              helpWanted: '一起做作品集',
+              reward: '互相练习',
+            },
+          },
+        }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '我的委托' }));
+    await user.click(await screen.findByRole('button', { name: '编辑委托：重提交后应刷新' }));
+    await user.click(await screen.findByRole('button', { name: '重新提交审核' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/my/requests/701',
+      expect.objectContaining({ method: 'PUT' }),
+    ));
+    await waitFor(() => expect(ownerListCalls).toBe(2));
+    expect(await screen.findByText('待审核')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '编辑委托：重提交后应刷新' })).not.toBeInTheDocument();
+  });
 });
 
 describe('LoginPage', () => {
@@ -991,6 +1063,35 @@ describe('user workflow pages', () => {
       },
     });
     expect(onEditComplete).toHaveBeenCalledWith(501);
+  });
+
+  it('locks trade type and existing images while editing a withdrawn trade request', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      request: {
+        id: 502,
+        type: 'trade',
+        title: '旧图交易委托',
+        city: '杭州',
+        remote: false,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        status: 'withdrawn',
+        details: {
+          itemName: '旧图商品',
+          price: '68元',
+          condition: '九成新',
+          deliveryMethod: '同城自取',
+        },
+        images: [{ url: '/uploads/request-images/old-trade.png' }],
+      },
+    }));
+
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} editRequestId={502} />);
+
+    expect(await screen.findByDisplayValue('旧图交易委托')).toBeVisible();
+    expect(screen.getByLabelText('类型')).toBeDisabled();
+    expect(screen.getByAltText('原有图片 1')).toHaveAttribute('src', '/uploads/request-images/old-trade.png');
+    expect(screen.queryByLabelText('买卖交易图片')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /移除图片/ })).not.toBeInTheDocument();
   });
 
   it('posts an approved remote request with a strict UTC expiry', async () => {
