@@ -326,6 +326,38 @@ describe('request, contact, and admin API', () => {
     expect(rejected.status).toBe(409);
   });
 
+  it('rejects changing a withdrawn trade request with images to a non-trade type', async () => {
+    const withdrawnId = insertRequest({ status: 'withdrawn', type: 'trade' });
+    db.prepare(
+      `INSERT INTO request_images (requestId, url, mimeType, sizeBytes, sortOrder)
+       VALUES (?, '/uploads/request-images/legacy.png', 'image/png', 12, 0)`,
+    ).run(withdrawnId);
+
+    const response = await request(app)
+      .put(`/api/my/requests/${withdrawnId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Should remain withdrawn',
+        city: 'Hangzhou',
+        remote: false,
+        industry: 'Technology',
+        budgetOrReward: 'Coffee',
+        expiresAt: FUTURE,
+        details: validDetails('other'),
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/trade|images/i);
+    expect(db.prepare('SELECT status, type FROM requests WHERE id = ?').get(withdrawnId)).toEqual({
+      status: 'withdrawn',
+      type: 'trade',
+    });
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM request_images WHERE requestId = ?').get(withdrawnId).count,
+    ).toBe(1);
+  });
+
   it('publishes a pending non-anonymous request for an approved owner', async () => {
     const response = await publish();
 

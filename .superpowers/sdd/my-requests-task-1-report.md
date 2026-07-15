@@ -34,6 +34,28 @@ Result: PASS - 2 test files, 83 tests passed.
 
 None.
 
+## Second Review Fix: Preserve Trade Type for Existing Images
+
+### Review Issue
+
+A withdrawn trade request with existing `request_images` could be resubmitted through `PUT /api/my/requests/:id` as a non-`trade` request, leaving the old images attached and bypassing the image/type rule.
+
+### Change Summary
+
+- Before updating an owned withdrawn request, load its existing images and reject a new non-`trade` type with HTTP 400.
+- Keep the existing `request_images` rows unchanged; image deletion management remains out of scope.
+- Added regression coverage for the 400 response, unchanged withdrawn status/type, and retained image row.
+
+### Tests
+
+Command: `npm test -- tests/api.requests.test.js`
+
+Result: PASS - 1 test file, 62 tests passed.
+
+### Concerns
+
+None.
+
 ## Review Fix: Resubmission State Restriction
 
 ### Review Issue
