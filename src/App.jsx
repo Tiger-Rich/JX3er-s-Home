@@ -135,6 +135,11 @@ export default function App() {
     });
   }
 
+  function openCreateRequest() {
+    setEditingRequestId(null);
+    handleTabChange('create');
+  }
+
   function handleRequestSelect(requestId) {
     setSelectedRequest({ id: requestId, source: 'public' });
     handleTabChange('feed');
@@ -172,7 +177,13 @@ export default function App() {
   return (
     <AppShell
       activeTab={activeTab}
-      onTabChange={handleTabChange}
+      onTabChange={(tab) => {
+        if (tab === 'create') {
+          openCreateRequest();
+          return;
+        }
+        handleTabChange(tab);
+      }}
       onLogout={handleLogout}
     >
       {visitedTabs.has('feed') && (
@@ -207,10 +218,7 @@ export default function App() {
           <MyRequestsPage
             refreshKey={myRequestsRefreshKey}
             onSelectRequest={handleMyRequestSelect}
-            onCreateRequest={() => {
-              setEditingRequestId(null);
-              handleTabChange('create');
-            }}
+            onCreateRequest={openCreateRequest}
             onEditRequest={(requestId) => {
               setEditingRequestId(requestId);
               handleTabChange('create');

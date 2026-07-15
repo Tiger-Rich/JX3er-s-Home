@@ -372,6 +372,93 @@ describe('MyRequestsPage', () => {
     expect(await screen.findByText('待审核')).toBeVisible();
     expect(screen.queryByRole('button', { name: '编辑委托：重提交后应刷新' })).not.toBeInTheDocument();
   });
+
+  it('starts a new request when bottom navigation opens create after editing a withdrawn request', async () => {
+    setToken(null);
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/auth/me') {
+        return Promise.resolve(jsonResponse({
+          user: { id: 9, role: 'user', nickname: '七秀' },
+          verificationStatus: 'approved',
+        }));
+      }
+      if (path === '/api/requests?channel=recommended&sort=recommended') {
+        return Promise.resolve(jsonResponse({ requests: [] }));
+      }
+      if (path === '/api/my/requests') {
+        return Promise.resolve(jsonResponse({
+          requests: [{
+            id: 702,
+            type: 'other',
+            title: '旧的撤回委托',
+            status: 'withdrawn',
+            city: '杭州',
+            remote: false,
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            details: {
+              requestKind: '找同门',
+              helpWanted: '一起做作品集',
+              reward: '互相练习',
+            },
+          }],
+        }));
+      }
+      if (path === '/api/my/requests/702') {
+        return Promise.resolve(jsonResponse({
+          request: {
+            id: 702,
+            type: 'other',
+            title: '旧的撤回委托',
+            status: 'withdrawn',
+            city: '杭州',
+            remote: false,
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            details: {
+              requestKind: '找同门',
+              helpWanted: '一起做作品集',
+              reward: '互相练习',
+            },
+          },
+        }));
+      }
+      if (path === '/api/requests' && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ request: { id: 703, status: 'pending' } }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '我的委托' }));
+    await user.click(await screen.findByRole('button', { name: '编辑委托：旧的撤回委托' }));
+    expect(await screen.findByRole('heading', { name: '修改委托' })).toBeVisible();
+    expect(screen.getByLabelText('标题')).toHaveValue('旧的撤回委托');
+
+    await user.click(screen.getByRole('button', { name: '万事广场' }));
+    await user.click(screen.getByRole('button', { name: '发个委托' }));
+
+    const createPage = (await screen.findByRole('heading', { name: '发个委托' })).closest('section');
+    expect(createPage).not.toBeNull();
+    const createForm = within(createPage);
+    expect(createForm.getByRole('button', { name: '发布委托' })).toBeVisible();
+    expect(createForm.getByLabelText('标题')).toHaveValue('');
+
+    await user.type(createForm.getByLabelText('标题'), '新的公开委托');
+    fillDefaultJobReferralDetails();
+    fireEvent.change(createForm.getByLabelText('城市'), { target: { value: '杭州' } });
+    fireEvent.change(createForm.getByLabelText('有效期'), { target: { value: '2030-01-02T10:30' } });
+    await user.click(createForm.getByRole('button', { name: '发布委托' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/requests',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    expect(fetch).not.toHaveBeenCalledWith(
+      '/api/my/requests/702',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+  });
 });
 
 describe('LoginPage', () => {
