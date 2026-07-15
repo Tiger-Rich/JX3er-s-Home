@@ -44,7 +44,24 @@ test('user manages pending and approved requests from my requests', async ({ pag
   await expect(pendingCard).toBeVisible();
   await pendingCard.getByRole('button', { name: `撤回委托：${pendingTitle}` }).click();
   await expect(pendingCard.getByText('已撤回', { exact: true })).toBeVisible();
-  await expect(pendingCard.getByRole('button', { name: `编辑委托：${pendingTitle}` })).toBeVisible();
+  await pendingCard.getByRole('button', { name: `编辑委托：${pendingTitle}` }).click();
+
+  const editedTitle = '已重新提交的种子委托';
+  const editPage = page.locator('.create-request-page');
+  await expect(editPage.getByRole('heading', { name: '修改委托' })).toBeVisible();
+  await editPage.locator('input[name="title"]').fill(editedTitle);
+  await editPage.getByRole('button', { name: '重新提交审核' }).click();
+
+  const resubmittedCard = page.locator('.my-request-card').filter({ hasText: editedTitle });
+  await expect(resubmittedCard).toBeVisible();
+  await expect(resubmittedCard.getByText('待审核', { exact: true })).toBeVisible();
+  await expect(resubmittedCard.getByRole('button', { name: `编辑委托：${editedTitle}` })).toHaveCount(0);
+
+  const rejectedTitle = '未通过的种子委托';
+  const rejectedCard = page.locator('.my-request-card').filter({ hasText: rejectedTitle });
+  await expect(rejectedCard).toBeVisible();
+  await expect(rejectedCard.getByText('未通过', { exact: true })).toBeVisible();
+  await expect(rejectedCard.getByRole('button', { name: `编辑委托：${rejectedTitle}` })).toHaveCount(0);
 
   const approvedTitle = '待关闭的种子委托';
   const approvedCard = page.locator('.my-request-card').filter({ hasText: approvedTitle });
