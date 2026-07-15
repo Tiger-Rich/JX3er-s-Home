@@ -16,7 +16,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [activeTab, setActiveTab] = useState('feed');
   const [visitedTabs, setVisitedTabs] = useState(() => new Set(['feed']));
-  const [selectedRequestId, setSelectedRequestId] = useState(null);
+  const [selectedRequest, setSelectedRequest] = useState(null);
   const mountedRef = useRef(false);
   const authenticationOwnerRef = useRef({ controller: null, version: 0 });
   const refreshOwnerRef = useRef({ controller: null, version: 0 });
@@ -134,7 +134,12 @@ export default function App() {
   }
 
   function handleRequestSelect(requestId) {
-    setSelectedRequestId(requestId);
+    setSelectedRequest({ id: requestId, source: 'public' });
+    handleTabChange('feed');
+  }
+
+  function handleMyRequestSelect(requestId) {
+    setSelectedRequest({ id: requestId, source: 'owner' });
     handleTabChange('feed');
   }
 
@@ -170,11 +175,12 @@ export default function App() {
     >
       {visitedTabs.has('feed') && (
         <div hidden={activeTab !== 'feed'}>
-          {selectedRequestId ? (
+          {selectedRequest ? (
             <RequestDetailPage
-              requestId={selectedRequestId}
+              requestId={selectedRequest.id}
               session={session}
-              onBack={() => setSelectedRequestId(null)}
+              mode={selectedRequest.source}
+              onBack={() => setSelectedRequest(null)}
             />
           ) : (
             <FeedPage onSelectRequest={handleRequestSelect} />
@@ -187,7 +193,7 @@ export default function App() {
       {visitedTabs.has('myRequests') && (
         <div hidden={activeTab !== 'myRequests'}>
           <MyRequestsPage
-            onSelectRequest={handleRequestSelect}
+            onSelectRequest={handleMyRequestSelect}
             onCreateRequest={() => handleTabChange('create')}
           />
         </div>

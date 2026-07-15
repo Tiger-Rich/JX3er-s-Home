@@ -208,7 +208,7 @@ describe('MyRequestsPage', () => {
     expect(screen.queryByRole('button', { name: '删除委托：已关闭' })).not.toBeInTheDocument();
   });
 
-  it('opens the selected request detail from my requests', async () => {
+  it('opens closed and withdrawn request details through the owner endpoint', async () => {
     setToken(null);
     fetch.mockImplementation((path) => {
       if (path === '/api/auth/me') {
@@ -225,20 +225,40 @@ describe('MyRequestsPage', () => {
           requests: [{
             id: 901,
             type: 'other',
-            title: '从我的委托查看详情',
+            title: '从我的委托查看已关闭详情',
             status: 'closed',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          }, {
+            id: 902,
+            type: 'other',
+            title: '从我的委托查看已撤回详情',
+            status: 'withdrawn',
             expiresAt: '2099-01-01T00:00:00.000Z',
           }],
         }));
       }
-      if (path === '/api/requests/901') {
+      if (path === '/api/my/requests/901') {
         return Promise.resolve(jsonResponse({
           request: {
             id: 901,
             ownerId: 9,
             type: 'other',
-            title: '从我的委托查看详情',
-            description: '详情已打开',
+            title: '从我的委托查看已关闭详情',
+            description: '已关闭详情已打开',
+            status: 'closed',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          },
+        }));
+      }
+      if (path === '/api/my/requests/902') {
+        return Promise.resolve(jsonResponse({
+          request: {
+            id: 902,
+            ownerId: 9,
+            type: 'other',
+            title: '从我的委托查看已撤回详情',
+            description: '已撤回详情已打开',
+            status: 'withdrawn',
             expiresAt: '2099-01-01T00:00:00.000Z',
           },
         }));
@@ -250,10 +270,23 @@ describe('MyRequestsPage', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: '我的委托' }));
-    await user.click(await screen.findByRole('button', { name: '查看委托：从我的委托查看详情' }));
+    await user.click(await screen.findByRole('button', { name: '查看委托：从我的委托查看已关闭详情' }));
 
-    expect(await screen.findByText('详情已打开')).toBeVisible();
-    expect(fetch).toHaveBeenCalledWith('/api/requests/901', expect.any(Object));
+    expect(await screen.findByText('已关闭详情已打开')).toBeVisible();
+    expect(fetch).toHaveBeenCalledWith('/api/my/requests/901', expect.any(Object));
+    expect(fetch).not.toHaveBeenCalledWith('/api/requests/901', expect.any(Object));
+    expect(screen.queryByRole('button', { name: '递出联系申请' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '收藏委托' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '返回万事广场' }));
+    await user.click(screen.getByRole('button', { name: '我的委托' }));
+    await user.click(screen.getByRole('button', { name: '查看委托：从我的委托查看已撤回详情' }));
+
+    expect(await screen.findByText('已撤回详情已打开')).toBeVisible();
+    expect(fetch).toHaveBeenCalledWith('/api/my/requests/902', expect.any(Object));
+    expect(fetch).not.toHaveBeenCalledWith('/api/requests/902', expect.any(Object));
+    expect(screen.queryByRole('button', { name: '递出联系申请' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '收藏委托' })).not.toBeInTheDocument();
   });
 });
 
