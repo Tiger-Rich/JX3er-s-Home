@@ -1711,6 +1711,45 @@ describe('admin review pages', () => {
     expect(screen.getByRole('button', { name: '通过委托' })).toBeEnabled();
   });
 
+  it('shows withdrawn and closed request statuses in the admin filter and list', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({
+      requests: [{ ...reviewedRequest, status: 'closed' }],
+    }));
+
+    render(<AdminRequests />);
+
+    await screen.findByRole('table', { name: '委托审核列表' });
+    const statusFilter = screen.getByLabelText('委托状态');
+    expect(within(statusFilter).getByRole('option', { name: '已撤回' })).toHaveValue('withdrawn');
+    expect(within(statusFilter).getByRole('option', { name: '已关闭' })).toHaveValue('closed');
+    expect(screen.getByText('已关闭', { selector: '.status-badge' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '通过委托' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下架委托' })).not.toBeInTheDocument();
+  });
+
+  it('hard deletes an admin request after confirmation text is entered', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ requests: [{ ...reviewedRequest, status: 'closed' }] }))
+      .mockResolvedValueOnce(jsonResponse({ deleted: true }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }));
+    const user = userEvent.setup();
+
+    render(<AdminRequests />);
+
+    await screen.findByRole('table', { name: '委托审核列表' });
+    const confirmInput = screen.getByLabelText('委托 41 彻底删除确认');
+    expect(screen.getByRole('button', { name: '彻底删除委托' })).toBeDisabled();
+    await user.type(confirmInput, '彻底删除');
+    await user.click(screen.getByRole('button', { name: '彻底删除委托' }));
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/admin/requests/41',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
   it('uses page-specific admin table classes and explicit action button variants', async () => {
     const approved = { ...reviewedRequest, id: 42, status: 'approved' };
     fetch.mockImplementation(() => Promise.resolve(jsonResponse({ requests: [reviewedRequest, approved] })));
@@ -1722,7 +1761,7 @@ describe('admin review pages', () => {
     expect(container.querySelector('.admin-actions button')).toHaveClass('button-primary');
 
     const actionButtons = [...container.querySelectorAll('.admin-actions button')];
-    expect(actionButtons.filter((button) => button.classList.contains('button-danger'))).toHaveLength(2);
+    expect(actionButtons.filter((button) => button.classList.contains('button-danger'))).toHaveLength(4);
   });
 
   it('renders admin typed detail summaries and trade image thumbnails', async () => {

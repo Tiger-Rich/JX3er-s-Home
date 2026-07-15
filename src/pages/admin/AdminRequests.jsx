@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Search, ShieldX, X } from 'lucide-react';
+import { Check, Search, ShieldX, Trash2, X } from 'lucide-react';
 
 import { api } from '../../api/client.js';
 import StatusBadge from '../../components/StatusBadge.jsx';
@@ -25,6 +25,7 @@ export default function AdminRequests({ onSummaryChange }) {
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState('');
   const [reasons, setReasons] = useState({});
+  const [deleteConfirmations, setDeleteConfirmations] = useState({});
   const [mutating, setMutating] = useState(false);
   const mountedRef = useRef(false);
   const activeFiltersRef = useRef(emptyFilters);
@@ -132,6 +133,39 @@ export default function AdminRequests({ onSummaryChange }) {
     }
   }
 
+  async function hardDelete(id) {
+    const owner = mutationOwnerRef.current;
+    if (owner.controller) return;
+    const controller = new AbortController();
+    const requestId = owner.version + 1;
+    owner.version = requestId;
+    owner.controller = controller;
+    setMutating(true);
+    setFeedback('');
+    setError('');
+    try {
+      await api(`/api/admin/requests/${id}`, {
+        method: 'DELETE',
+        signal: controller.signal,
+      });
+      if (!mountedRef.current || owner.version !== requestId) return;
+      const refreshed = await load(activeFiltersRef.current);
+      if (!mountedRef.current || owner.version !== requestId || !refreshed) return;
+      await refreshPendingSummary();
+      if (!mountedRef.current || owner.version !== requestId) return;
+      setFeedback('委托已彻底删除');
+      setDeleteConfirmations((current) => ({ ...current, [id]: '' }));
+    } catch (mutationError) {
+      if (!mountedRef.current || owner.version !== requestId || mutationError.name === 'AbortError') return;
+      setError(mutationError.message || '暂时无法彻底删除委托');
+    } finally {
+      if (owner.version === requestId) {
+        owner.controller = null;
+        if (mountedRef.current) setMutating(false);
+      }
+    }
+  }
+
   function reasonControl(item, action, label) {
     const key = `${item.id}:${action}`;
     const reason = reasons[key] ?? '';
@@ -150,7 +184,7 @@ export default function AdminRequests({ onSummaryChange }) {
       <div className="admin-page-heading">
         <h2 id="admin-requests-title">委托审核</h2>
         <form onSubmit={submitFilters} className="admin-filters">
-          <label>委托状态<select name="status" value={filters.status} onChange={updateFilter}><option value="">全部</option><option value="draft">草稿</option><option value="pending">待审核</option><option value="approved">已发布</option><option value="rejected">未通过</option><option value="taken_down">已下架</option><option value="expired">已过期</option></select></label>
+          <label>委托状态<select name="status" value={filters.status} onChange={updateFilter}><option value="">全部</option><option value="draft">草稿</option><option value="pending">待审核</option><option value="approved">已发布</option><option value="rejected">未通过</option><option value="taken_down">已下架</option><option value="withdrawn">已撤回</option><option value="closed">已关闭</option><option value="expired">已过期</option></select></label>
           <label>委托类型<select name="type" value={filters.type} onChange={updateFilter}><option value="">全部</option>{requestTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
           <label>委托城市<input name="city" value={filters.city} onChange={updateFilter} /></label>
           <label>委托行业<input name="industry" value={filters.industry} onChange={updateFilter} /></label>
@@ -200,7 +234,9 @@ export default function AdminRequests({ onSummaryChange }) {
                   <td><div className="admin-actions">
                     {item.status === 'pending' && <><button type="button" disabled={mutating} className="button-primary" onClick={() => transition(item, 'approve')}><Check aria-hidden="true" size={18} />通过委托</button>{reasonControl(item, 'reject', '拒绝')}</>}
                     {item.status === 'approved' && reasonControl(item, 'takedown', '下架')}
-                    {!['pending', 'approved'].includes(item.status) && '无需操作'}
+                    {!['pending', 'approved'].includes(item.status) && '无需审核操作'}
+                    <label>彻底删除确认<input aria-label={`委托 ${item.id} 彻底删除确认`} value={deleteConfirmations[item.id] ?? ''} onChange={(event) => setDeleteConfirmations((current) => ({ ...current, [item.id]: event.target.value }))} /></label>
+                    <button type="button" disabled={mutating || deleteConfirmations[item.id] !== '彻底删除'} className="button-danger" onClick={() => hardDelete(item.id)}><Trash2 aria-hidden="true" size={18} />彻底删除委托</button>
                   </div></td>
                 </tr>
               );

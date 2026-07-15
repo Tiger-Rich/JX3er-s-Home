@@ -331,6 +331,19 @@ export function createAdminRouter(db) {
     transitionRequest('approved', 'taken_down', 'takedownReason'),
   );
 
+  router.delete('/requests/:id', (req, res, next) => {
+    try {
+      const id = positiveId(req.params.id);
+      const result = db.prepare('DELETE FROM requests WHERE id = ?').run(id);
+      if (result.changes === 0) {
+        return res.status(404).json({ error: 'Request not found' });
+      }
+      return res.json({ deleted: true });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.get('/users', (req, res, next) => {
     try {
       const clauses = [];

@@ -20,6 +20,8 @@ export const requestStatusLabels = {
   approved: '已发布',
   rejected: '未通过',
   taken_down: '已下架',
+  withdrawn: '已撤回',
+  closed: '已关闭',
   expired: '已过期',
 };
 

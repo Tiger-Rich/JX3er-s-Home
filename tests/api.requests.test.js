@@ -1381,6 +1381,29 @@ describe('request, contact, and admin API', () => {
     expect(repeated.status).toBe(409);
   });
 
+  it('lets admins hard delete requests and cascades request-owned records', async () => {
+    const requestId = insertRequest({ status: 'closed', title: 'Delete me' });
+    db.prepare('INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)').run(users.wanhua, requestId);
+    db.prepare('INSERT INTO favorites (userId, requestId) VALUES (?, ?)').run(users.wanhua, requestId);
+
+    const nonAdmin = await request(app)
+      .delete(`/api/admin/requests/${requestId}`)
+      .set(auth(users.qixiu));
+    const deleted = await request(app)
+      .delete(`/api/admin/requests/${requestId}`)
+      .set(auth(users.admin));
+    const repeated = await request(app)
+      .delete(`/api/admin/requests/${requestId}`)
+      .set(auth(users.admin));
+
+    expect(nonAdmin.status).toBe(403);
+    expect(deleted.body).toEqual({ deleted: true });
+    expect(repeated.status).toBe(404);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM requests WHERE id = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM favorites WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM request_reactions WHERE requestId = ?').get(requestId).count).toBe(0);
+  });
+
   it.each([
     ['expired', { expiresAt: PAST }],
     ['owned by a disabled user', { disableOwner: true }],
