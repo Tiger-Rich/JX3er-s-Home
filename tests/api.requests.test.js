@@ -272,9 +272,10 @@ describe('request, contact, and admin API', () => {
     expect(stranger.status).toBe(404);
   });
 
-  it('resubmits only withdrawn and rejected requests as pending', async () => {
+  it('resubmits withdrawn requests only and rejects direct edits for other states', async () => {
     const withdrawnId = insertRequest({ status: 'withdrawn', title: 'Old withdrawn' });
     const approvedId = insertRequest({ status: 'approved', title: 'Published' });
+    const rejectedId = insertRequest({ status: 'rejected', title: 'Rejected request' });
 
     const resubmitted = await request(app)
       .put(`/api/my/requests/${withdrawnId}`)
@@ -300,6 +301,19 @@ describe('request, contact, and admin API', () => {
         expiresAt: FUTURE,
         details: validDetails('other'),
       });
+    const rejected = await request(app)
+      .put(`/api/my/requests/${rejectedId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Rejected update',
+        city: 'Hangzhou',
+        remote: false,
+        industry: 'Technology',
+        budgetOrReward: 'Coffee',
+        expiresAt: FUTURE,
+        details: validDetails('other'),
+      });
 
     expect(resubmitted.status).toBe(200);
     expect(resubmitted.body.request).toMatchObject({
@@ -309,6 +323,7 @@ describe('request, contact, and admin API', () => {
       rejectReason: null,
     });
     expect(illegal.status).toBe(409);
+    expect(rejected.status).toBe(409);
   });
 
   it('publishes a pending non-anonymous request for an approved owner', async () => {

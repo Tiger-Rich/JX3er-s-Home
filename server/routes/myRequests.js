@@ -188,7 +188,7 @@ export function createMyRequestsRouter(db) {
             budgetOrReward = @budgetOrReward, expiresAt = @expiresAt,
             status = 'pending', rejectReason = NULL, withdrawnAt = NULL,
             closedAt = NULL, ownerHiddenAt = NULL, updatedAt = CURRENT_TIMESTAMP
-        WHERE id = @id AND ownerId = @ownerId AND status IN ('withdrawn', 'rejected')
+        WHERE id = @id AND ownerId = @ownerId AND status = 'withdrawn'
       `).run({ ...values, id });
       if (result.changes === 0) {
         return res.status(409).json({ error: 'Request cannot be resubmitted in its current state' });
