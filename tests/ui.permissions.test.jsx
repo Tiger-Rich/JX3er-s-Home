@@ -162,6 +162,13 @@ describe('MyRequestsPage', () => {
           favoriteCount: 0,
           applicationCount: 0,
         },
+        {
+          id: 303,
+          type: 'other',
+          title: '已撤回委托',
+          status: 'withdrawn',
+          expiresAt: '2099-01-01T00:00:00.000Z',
+        },
       ],
     }));
 
@@ -171,6 +178,7 @@ describe('MyRequestsPage', () => {
     expect(screen.getByRole('button', { name: '撤回委托：待评审委托' })).toBeVisible();
     expect(screen.getByRole('button', { name: '关闭委托：已发布委托' })).toBeVisible();
     expect(screen.getByText('联系申请 3')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '编辑委托：已撤回委托' })).not.toBeInTheDocument();
   });
 
   it('withdraws, closes, and hides owner requests from the list', async () => {
@@ -197,6 +205,55 @@ describe('MyRequestsPage', () => {
     expect(fetch).toHaveBeenCalledWith('/api/my/requests/402/close', expect.objectContaining({ method: 'POST' }));
     expect(fetch).toHaveBeenCalledWith('/api/my/requests/403/hide', expect.objectContaining({ method: 'POST' }));
     expect(screen.queryByRole('heading', { name: '已关闭' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '删除委托：已关闭' })).not.toBeInTheDocument();
+  });
+
+  it('opens the selected request detail from my requests', async () => {
+    setToken(null);
+    fetch.mockImplementation((path) => {
+      if (path === '/api/auth/me') {
+        return Promise.resolve(jsonResponse({
+          user: { id: 9, role: 'user', nickname: '七秀' },
+          verificationStatus: 'approved',
+        }));
+      }
+      if (path === '/api/requests?channel=recommended&sort=recommended') {
+        return Promise.resolve(jsonResponse({ requests: [] }));
+      }
+      if (path === '/api/my/requests') {
+        return Promise.resolve(jsonResponse({
+          requests: [{
+            id: 901,
+            type: 'other',
+            title: '从我的委托查看详情',
+            status: 'closed',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          }],
+        }));
+      }
+      if (path === '/api/requests/901') {
+        return Promise.resolve(jsonResponse({
+          request: {
+            id: 901,
+            ownerId: 9,
+            type: 'other',
+            title: '从我的委托查看详情',
+            description: '详情已打开',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          },
+        }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '我的委托' }));
+    await user.click(await screen.findByRole('button', { name: '查看委托：从我的委托查看详情' }));
+
+    expect(await screen.findByText('详情已打开')).toBeVisible();
+    expect(fetch).toHaveBeenCalledWith('/api/requests/901', expect.any(Object));
   });
 });
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, FilePenLine, Send, Trash2, XCircle } from 'lucide-react';
+import { Eye, Send, Trash2, XCircle } from 'lucide-react';
 
 import { api } from '../api/client.js';
 import StatusBadge from '../components/StatusBadge.jsx';
@@ -16,7 +16,7 @@ function locationLabel(request) {
   return request.city || '未标注城市';
 }
 
-export default function MyRequestsPage({ onSelectRequest, onEditRequest, onCreateRequest }) {
+export default function MyRequestsPage({ onSelectRequest, onCreateRequest }) {
   const [filter, setFilter] = useState('');
   const [state, setState] = useState({ loading: true, error: '', requests: [] });
   const [busyId, setBusyId] = useState(null);
@@ -132,11 +132,7 @@ export default function MyRequestsPage({ onSelectRequest, onEditRequest, onCreat
         </button>
       );
     }
-    return (
-      <button key={action} type="button" className="button-secondary" onClick={() => onEditRequest?.(request.id)} aria-label={`编辑委托：${request.title}`}>
-        <FilePenLine aria-hidden="true" size={18} />编辑并重新提交
-      </button>
-    );
+    return null;
   }
 
   return (
