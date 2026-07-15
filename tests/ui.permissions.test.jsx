@@ -169,16 +169,28 @@ describe('MyRequestsPage', () => {
           status: 'withdrawn',
           expiresAt: '2099-01-01T00:00:00.000Z',
         },
+        {
+          id: 304,
+          type: 'other',
+          title: '未通过委托',
+          status: 'rejected',
+          expiresAt: '2099-01-01T00:00:00.000Z',
+        },
       ],
     }));
 
-    render(<MyRequestsPage onSelectRequest={vi.fn()} onEditRequest={vi.fn()} onCreateRequest={vi.fn()} />);
+    const onEditRequest = vi.fn();
+    const user = userEvent.setup();
+    render(<MyRequestsPage onSelectRequest={vi.fn()} onEditRequest={onEditRequest} onCreateRequest={vi.fn()} />);
 
     expect(await screen.findByRole('heading', { name: '我的委托' })).toBeVisible();
     expect(screen.getByRole('button', { name: '撤回委托：待评审委托' })).toBeVisible();
     expect(screen.getByRole('button', { name: '关闭委托：已发布委托' })).toBeVisible();
     expect(screen.getByText('联系申请 3')).toBeVisible();
-    expect(screen.queryByRole('button', { name: '编辑委托：已撤回委托' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '编辑委托：已撤回委托' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '编辑委托：未通过委托' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '编辑委托：已撤回委托' }));
+    expect(onEditRequest).toHaveBeenCalledWith(303);
   });
 
   it('withdraws, closes, and hides owner requests from the list', async () => {
@@ -918,6 +930,67 @@ describe('user workflow pages', () => {
     const { container } = render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
 
     expect(container.querySelector('button[type="submit"]')).toHaveClass('button-primary');
+  });
+
+  it('loads a withdrawn request into the create form and resubmits it', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        request: {
+          id: 501,
+          type: 'other',
+          title: '旧标题',
+          city: '杭州',
+          remote: false,
+          industry: 'Technology',
+          budgetOrReward: 'Coffee',
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          status: 'withdrawn',
+          details: {
+            requestKind: '找同门',
+            helpWanted: '一起做作品集',
+            reward: '互相练习',
+          },
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ request: { id: 501, status: 'pending' } }));
+    const onEditComplete = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <CreateRequestPage
+        session={{ verificationStatus: 'approved' }}
+        editRequestId={501}
+        onEditComplete={onEditComplete}
+      />,
+    );
+
+    expect(await screen.findByDisplayValue('旧标题')).toBeVisible();
+    expect(screen.getByRole('heading', { name: '修改委托' })).toBeVisible();
+    await user.clear(screen.getByLabelText('标题'));
+    await user.type(screen.getByLabelText('标题'), '新标题');
+    await user.click(screen.getByRole('button', { name: '重新提交审核' }));
+
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/my/requests/501',
+      expect.objectContaining({
+        method: 'PUT',
+        body: expect.any(String),
+      }),
+    );
+    expect(JSON.parse(fetch.mock.calls.at(-1)[1].body)).toMatchObject({
+      type: 'other',
+      title: '新标题',
+      city: '杭州',
+      remote: false,
+      industry: 'Technology',
+      budgetOrReward: 'Coffee',
+      details: {
+        requestKind: '找同门',
+        helpWanted: '一起做作品集',
+        reward: '互相练习',
+      },
+    });
+    expect(onEditComplete).toHaveBeenCalledWith(501);
   });
 
   it('posts an approved remote request with a strict UTC expiry', async () => {

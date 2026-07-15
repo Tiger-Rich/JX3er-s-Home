@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, Send, Trash2, XCircle } from 'lucide-react';
+import { Eye, FilePenLine, Send, Trash2, XCircle } from 'lucide-react';
 
 import { api } from '../api/client.js';
 import StatusBadge from '../components/StatusBadge.jsx';
@@ -16,7 +16,7 @@ function locationLabel(request) {
   return request.city || '未标注城市';
 }
 
-export default function MyRequestsPage({ onSelectRequest, onCreateRequest }) {
+export default function MyRequestsPage({ onSelectRequest, onEditRequest, onCreateRequest }) {
   const [filter, setFilter] = useState('');
   const [state, setState] = useState({ loading: true, error: '', requests: [] });
   const [busyId, setBusyId] = useState(null);
@@ -175,6 +175,11 @@ export default function MyRequestsPage({ onSelectRequest, onCreateRequest }) {
                 <button type="button" className="button-secondary" onClick={() => onSelectRequest?.(request.id)} aria-label={`查看委托：${request.title}`}>
                   <Eye aria-hidden="true" size={18} />查看
                 </button>
+                {request.status === 'withdrawn' && (
+                  <button type="button" className="button-secondary" onClick={() => onEditRequest?.(request.id)} aria-label={`编辑委托：${request.title}`}>
+                    <FilePenLine aria-hidden="true" size={18} />编辑并重新提交
+                  </button>
+                )}
                 {myRequestActions(request).map((action) => renderAction(request, action))}
               </div>
             </article>
