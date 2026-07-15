@@ -21,6 +21,8 @@ export const REQUEST_STATUSES = [
   'rejected',
   'taken_down',
   'expired',
+  'withdrawn',
+  'closed',
 ];
 
 export const APPLICATION_STATUSES = ['pending', 'approved', 'rejected'];

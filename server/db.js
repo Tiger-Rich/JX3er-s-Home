@@ -23,9 +23,25 @@ export function createDatabase(filename) {
 }
 
 function migrateDatabase(db) {
-  const requestColumns = db.pragma('table_info(requests)');
+  let requestColumns = db.pragma('table_info(requests)');
   if (!requestColumns.some(({ name }) => name === 'details')) {
     db.exec("ALTER TABLE requests ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    requestColumns = db.pragma('table_info(requests)');
+  }
+  for (const [name, definition] of [
+    ['withdrawnAt', 'TEXT'],
+    ['closedAt', 'TEXT'],
+    ['ownerHiddenAt', 'TEXT'],
+  ]) {
+    if (!requestColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE requests ADD COLUMN ${name} ${definition}`);
+    }
+  }
+  const requestSql = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'requests'")
+    .get().sql;
+  if (!requestSql.includes("'withdrawn'") || !requestSql.includes("'closed'")) {
+    rebuildRequestsForLifecycle(db);
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS request_reactions (
@@ -38,6 +54,61 @@ function migrateDatabase(db) {
       FOREIGN KEY (requestId) REFERENCES requests(id) ON DELETE CASCADE
     )
   `);
+}
+
+function rebuildRequestsForLifecycle(db) {
+  db.pragma('foreign_keys = OFF');
+  db.pragma('legacy_alter_table = ON');
+  try {
+    db.transaction(() => {
+      db.exec('ALTER TABLE requests RENAME TO requests_legacy');
+      db.exec(`
+        CREATE TABLE requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ownerId INTEGER NOT NULL,
+          type TEXT NOT NULL CHECK (type IN (
+            'job_referral', 'industry_consulting', 'trade', 'commission', 'local_help', 'other'
+          )),
+          title TEXT NOT NULL,
+          description TEXT NOT NULL,
+          details TEXT NOT NULL DEFAULT '{}',
+          city TEXT,
+          remote INTEGER NOT NULL DEFAULT 0 CHECK (remote IN (0, 1)),
+          industry TEXT,
+          budgetOrReward TEXT,
+          expiresAt TEXT NOT NULL CHECK (datetime(expiresAt) IS NOT NULL),
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN (
+            'draft', 'pending', 'approved', 'rejected', 'taken_down', 'expired', 'withdrawn', 'closed'
+          )),
+          rejectReason TEXT,
+          takedownReason TEXT,
+          withdrawnAt TEXT,
+          closedAt TEXT,
+          ownerHiddenAt TEXT,
+          createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (id, ownerId),
+          FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`
+        INSERT INTO requests (
+          id, ownerId, type, title, description, details, city, remote,
+          industry, budgetOrReward, expiresAt, status, rejectReason,
+          takedownReason, withdrawnAt, closedAt, ownerHiddenAt, createdAt, updatedAt
+        )
+        SELECT
+          id, ownerId, type, title, description, details, city, remote,
+          industry, budgetOrReward, expiresAt, status, rejectReason,
+          takedownReason, withdrawnAt, closedAt, ownerHiddenAt, createdAt, updatedAt
+        FROM requests_legacy
+      `);
+      db.exec('DROP TABLE requests_legacy');
+    })();
+  } finally {
+    db.pragma('legacy_alter_table = OFF');
+    db.pragma('foreign_keys = ON');
+  }
 }
 
 export function seedDatabase(db) {

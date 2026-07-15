@@ -200,6 +200,117 @@ describe('request, contact, and admin API', () => {
     return call;
   }
 
+  it('lets owners list private lifecycle states and hides owner-hidden closed requests', async () => {
+    const pendingId = insertRequest({ status: 'pending', title: 'Pending mine' });
+    const closedId = insertRequest({ status: 'closed', title: 'Closed mine' });
+    const hiddenId = insertRequest({ status: 'closed', title: 'Hidden mine' });
+    db.prepare('UPDATE requests SET ownerHiddenAt = CURRENT_TIMESTAMP WHERE id = ?').run(hiddenId);
+
+    const response = await request(app)
+      .get('/api/my/requests')
+      .set(auth(users.qixiu));
+
+    expect(response.status).toBe(200);
+    expect(response.body.requests.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([pendingId, closedId]),
+    );
+    expect(response.body.requests.map(({ id }) => id)).not.toContain(hiddenId);
+    expect(response.body.requests).toContainEqual(expect.objectContaining({
+      id: closedId,
+      status: 'closed',
+      favoriteCount: expect.any(Number),
+      reactionCount: expect.any(Number),
+      applicationCount: expect.any(Number),
+    }));
+  });
+
+  it('keeps withdrawn, closed, and owner-hidden requests out of public results', async () => {
+    const withdrawnId = insertRequest({ status: 'withdrawn', title: 'Withdrawn public' });
+    const closedId = insertRequest({ status: 'closed', title: 'Closed public' });
+    const hiddenId = insertRequest({ title: 'Hidden public' });
+    db.prepare('UPDATE requests SET ownerHiddenAt = CURRENT_TIMESTAMP WHERE id = ?').run(hiddenId);
+
+    const feed = await request(app).get('/api/requests');
+    const withdrawn = await request(app).get(`/api/requests/${withdrawnId}`);
+    const closed = await request(app).get(`/api/requests/${closedId}`);
+    const hidden = await request(app).get(`/api/requests/${hiddenId}`);
+
+    expect(feed.body.requests.map(({ id }) => id)).not.toEqual(
+      expect.arrayContaining([withdrawnId, closedId, hiddenId]),
+    );
+    expect(withdrawn.status).toBe(404);
+    expect(closed.status).toBe(404);
+    expect(hidden.status).toBe(404);
+  });
+
+  it('enforces owner request lifecycle transitions', async () => {
+    const pendingId = insertRequest({ status: 'pending', title: 'Can withdraw' });
+    const approvedId = insertRequest({ status: 'approved', title: 'Can close' });
+    const rejectedId = insertRequest({ status: 'rejected', title: 'Can resubmit' });
+    const strangerId = insertUser({ account: 'my-request-stranger' });
+
+    const withdraw = await request(app)
+      .post(`/api/my/requests/${pendingId}/withdraw`)
+      .set(auth(users.qixiu));
+    const withdrawApproved = await request(app)
+      .post(`/api/my/requests/${approvedId}/withdraw`)
+      .set(auth(users.qixiu));
+    const close = await request(app)
+      .post(`/api/my/requests/${approvedId}/close`)
+      .set(auth(users.qixiu));
+    const hide = await request(app)
+      .post(`/api/my/requests/${approvedId}/hide`)
+      .set(auth(users.qixiu));
+    const stranger = await request(app)
+      .post(`/api/my/requests/${rejectedId}/withdraw`)
+      .set(auth(strangerId));
+
+    expect(withdraw.body.request).toMatchObject({ id: pendingId, status: 'withdrawn' });
+    expect(withdrawApproved.status).toBe(409);
+    expect(close.body.request).toMatchObject({ id: approvedId, status: 'closed' });
+    expect(hide.body).toEqual({ hidden: true });
+    expect(stranger.status).toBe(404);
+  });
+
+  it('resubmits only withdrawn and rejected requests as pending', async () => {
+    const withdrawnId = insertRequest({ status: 'withdrawn', title: 'Old withdrawn' });
+    const approvedId = insertRequest({ status: 'approved', title: 'Published' });
+
+    const resubmitted = await request(app)
+      .put(`/api/my/requests/${withdrawnId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Updated request',
+        city: 'Hangzhou',
+        remote: false,
+        industry: 'Technology',
+        budgetOrReward: 'Coffee',
+        expiresAt: FUTURE,
+        details: validDetails('other', { requestKind: 'Updated kind' }),
+      });
+    const illegal = await request(app)
+      .put(`/api/my/requests/${approvedId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Illegal update',
+        city: 'Hangzhou',
+        remote: false,
+        expiresAt: FUTURE,
+        details: validDetails('other'),
+      });
+
+    expect(resubmitted.status).toBe(200);
+    expect(resubmitted.body.request).toMatchObject({
+      id: withdrawnId,
+      title: 'Updated request',
+      status: 'pending',
+      rejectReason: null,
+    });
+    expect(illegal.status).toBe(409);
+  });
+
   it('publishes a pending non-anonymous request for an approved owner', async () => {
     const response = await publish();
 

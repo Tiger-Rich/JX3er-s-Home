@@ -74,10 +74,15 @@ CREATE TABLE IF NOT EXISTS requests (
       'approved',
       'rejected',
       'taken_down',
-      'expired'
+      'expired',
+      'withdrawn',
+      'closed'
     )),
   rejectReason TEXT,
   takedownReason TEXT,
+  withdrawnAt TEXT,
+  closedAt TEXT,
+  ownerHiddenAt TEXT,
   createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (id, ownerId),

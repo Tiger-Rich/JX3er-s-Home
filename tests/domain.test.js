@@ -51,6 +51,8 @@ describe('domain constants', () => {
       'rejected',
       'taken_down',
       'expired',
+      'withdrawn',
+      'closed',
     ]);
     expect(APPLICATION_STATUSES).toEqual(['pending', 'approved', 'rejected']);
   });

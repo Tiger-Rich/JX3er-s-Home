@@ -3,17 +3,12 @@ import { Router } from 'express';
 import { optionalUser, requireUser } from '../auth.js';
 import { normalizeFeedQuery, sortFeedRows } from '../feedDiscovery.js';
 import {
-  REQUEST_TYPES,
   canApplyContact,
   canPublishRequest,
   isActiveVerifiedUser,
 } from '../domain.js';
-import {
-  buildRequestDescription,
-  normalizeRequestDetails,
-  parseRequestDetails,
-  requestIndustry,
-} from '../requestDetails.js';
+import { parseRequestDetails } from '../requestDetails.js';
+import { buildRequestValuesFromBody } from '../requestPayload.js';
 import {
   insertRequestImages,
   loadImagesForRequests,
@@ -61,9 +56,6 @@ const FEED_AGGREGATE_JOINS = `
          WHERE rr.userId = owned.ownerId
          GROUP BY rr.requestId
        ) orx ON orx.requestId = r.id`;
-const UTC_ISO_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
-
 function clientError(status, message) {
   const error = new Error(message);
   error.status = status;
@@ -85,66 +77,6 @@ function requiredText(value, field, maxLength) {
   const normalized = value.trim();
   if (normalized.length > maxLength) {
     throw clientError(400, `${field} must be at most ${maxLength} characters`);
-  }
-  return normalized;
-}
-
-function optionalText(value, field, maxLength) {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== 'string') {
-    throw clientError(400, `${field} must be a string`);
-  }
-  const normalized = value.trim();
-  if (normalized.length > maxLength) {
-    throw clientError(400, `${field} must be at most ${maxLength} characters`);
-  }
-  return normalized || null;
-}
-
-function parseMultipartDetails(value) {
-  if (typeof value !== 'string') {
-    throw clientError(400, 'details must be a JSON object');
-  }
-  try {
-    return JSON.parse(value);
-  } catch {
-    throw clientError(400, 'details must be valid JSON');
-  }
-}
-
-function parseRemote(value, multipart) {
-  if (value === undefined) return false;
-  if (multipart) {
-    if (!['true', 'false'].includes(value)) {
-      throw clientError(400, 'remote must be true or false');
-    }
-    return value === 'true';
-  }
-  if (typeof value !== 'boolean') {
-    throw clientError(400, 'remote must be a boolean');
-  }
-  return value;
-}
-
-function futureUtcIso(value) {
-  const input = requiredText(value, 'expiresAt', 64);
-  if (input !== value || !UTC_ISO_PATTERN.test(input)) {
-    throw clientError(400, 'expiresAt must be a valid future UTC ISO date');
-  }
-
-  const expiry = new Date(input);
-  const normalized = Number.isNaN(expiry.getTime())
-    ? null
-    : expiry.toISOString();
-  const canonicalInput = input.includes('.')
-    ? input
-    : input.replace('Z', '.000Z');
-  if (
-    !normalized ||
-    normalized !== canonicalInput ||
-    expiry.getTime() <= Date.now()
-  ) {
-    throw clientError(400, 'expiresAt must be a valid future UTC ISO date');
   }
   return normalized;
 }
@@ -195,6 +127,7 @@ function publicRequestById(db, id, userId = null) {
        LEFT JOIN verifications v ON v.userId = u.id
        ${FEED_AGGREGATE_JOINS}
        WHERE r.id = ? AND r.status = 'approved' AND u.status = 'active'
+         AND r.ownerHiddenAt IS NULL
          AND datetime(r.expiresAt) > datetime('now')`,
     )
     .get(userId, userId, id);
@@ -242,6 +175,7 @@ export function createRequestsRouter(db) {
       const clauses = [
         "r.status = 'approved'",
         "u.status = 'active'",
+        'r.ownerHiddenAt IS NULL',
         "datetime(r.expiresAt) > datetime('now')",
       ];
       const values = [];
@@ -337,46 +271,10 @@ export function createRequestsRouter(db) {
         const multipart = req.is('multipart/form-data');
         const files = req.files ?? [];
         const body = req.body ?? {};
-        const type = requiredText(body.type, 'type', 40);
-        if (!Object.hasOwn(REQUEST_TYPES, type)) {
-          throw clientError(400, 'Invalid request type');
-        }
-        const title = requiredText(body.title, 'title', 160);
-        const rawDetails = multipart
-          ? parseMultipartDetails(body.details)
-          : body.details;
-        const details = normalizeRequestDetails(type, rawDetails);
-        const description = buildRequestDescription(type, details);
-        const city = optionalText(body.city, 'city', 80);
-        const remote = parseRemote(body.remote, multipart);
-        if (!city && !remote) {
-          throw clientError(400, 'city or remote=true is required');
-        }
-        if (files.length > 0 && type !== 'trade') {
+        const values = buildRequestValuesFromBody(req.user.id, body, { multipart });
+        if (files.length > 0 && values.type !== 'trade') {
           throw clientError(400, 'Images are only allowed for trade requests');
         }
-        const expiresAt = futureUtcIso(body.expiresAt);
-
-        const values = {
-          ownerId: req.user.id,
-          type,
-          title,
-          description,
-          details: JSON.stringify(details),
-          city,
-          remote: remote ? 1 : 0,
-          industry: requestIndustry(
-            type,
-            details,
-            optionalText(body.industry, 'industry', 120),
-          ),
-          budgetOrReward: optionalText(
-            body.budgetOrReward,
-            'budgetOrReward',
-            500,
-          ),
-          expiresAt,
-        };
         const createRequest = db.transaction(() => {
           const result = db
             .prepare(

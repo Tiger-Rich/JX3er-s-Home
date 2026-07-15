@@ -10,6 +10,7 @@ import {
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createContactRouter } from './routes/contact.js';
+import { createMyRequestsRouter } from './routes/myRequests.js';
 import { createProfileRouter } from './routes/profile.js';
 import { createRequestsRouter } from './routes/requests.js';
 
@@ -31,6 +32,7 @@ export function createApp(db) {
   });
   app.use('/api/auth', createAuthRouter(db));
   app.use('/api/profile', createProfileRouter(db));
+  app.use('/api/my/requests', createMyRequestsRouter(db));
   app.use('/api/requests', createRequestsRouter(db));
   app.use('/api/contact', createContactRouter(db));
   app.use('/api/admin', createAdminRouter(db));
