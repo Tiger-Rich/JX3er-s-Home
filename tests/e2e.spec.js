@@ -30,6 +30,38 @@ test('loads the seeded user shell after login', async ({ page }) => {
   await expect(page.getByText('匿名')).toHaveCount(0);
 });
 
+test('uses a two-column note-card feed layout on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+
+  await page.locator('input[name="account"]').fill('qixiu');
+  await page.locator('input[name="password"]').fill('test123');
+  await page.locator('form button[type="submit"]').click();
+
+  const cards = page.locator('.request-card');
+  await expect(cards.nth(1)).toBeVisible();
+
+  const [firstBox, secondBox] = await Promise.all([
+    cards.nth(0).boundingBox(),
+    cards.nth(1).boundingBox(),
+  ]);
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  expect(Math.abs(firstBox.y - secondBox.y)).toBeLessThanOrEqual(16);
+  expect(secondBox.x).toBeGreaterThan(firstBox.x + firstBox.width * 0.72);
+  expect(firstBox.width).toBeGreaterThanOrEqual(140);
+
+  const firstCard = cards.nth(0);
+  const [heartBox, viewBox] = await Promise.all([
+    firstCard.locator('.reaction-button').boundingBox(),
+    firstCard.locator('.request-card-actions .button-secondary').boundingBox(),
+  ]);
+  expect(heartBox).not.toBeNull();
+  expect(viewBox).not.toBeNull();
+  expect(Math.abs(heartBox.y - viewBox.y)).toBeLessThanOrEqual(12);
+  expect(viewBox.x).toBeGreaterThan(heartBox.x + heartBox.width - 2);
+});
+
 test('user manages pending and approved requests from my requests', async ({ page }) => {
   await page.goto('/');
   await page.locator('input[name="account"]').fill('qixiu');
