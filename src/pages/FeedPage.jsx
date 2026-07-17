@@ -7,7 +7,6 @@ import { requestTypes } from '../domain/constants.js';
 import {
   buildRequestCardFacts,
   feedChannels,
-  feedSorts,
 } from '../domain/feedDiscovery.js';
 
 function requestTypeLabel(value) {
@@ -18,9 +17,9 @@ export default function FeedPage({ onSelectRequest, refreshKey = 0 }) {
   const [filters, setFilters] = useState({ type: '', city: '', industry: '', remote: '' });
   const [state, setState] = useState({ loading: true, error: '', requests: [] });
   const [channel, setChannel] = useState('recommended');
-  const [sort, setSort] = useState('recommended');
   const [mutationError, setMutationError] = useState('');
   const [pendingReactionId, setPendingReactionId] = useState(null);
+  const sort = channel === 'latest' ? 'latest' : 'recommended';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -105,18 +104,6 @@ export default function FeedPage({ onSelectRequest, refreshKey = 0 }) {
             type="button"
             className={item.value === channel ? 'button-primary' : 'button-secondary'}
             onClick={() => setChannel(item.value)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <div className="feed-sort-bar" role="group" aria-label="委托排序">
-        {feedSorts.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            className={item.value === sort ? 'button-primary' : 'button-secondary'}
-            onClick={() => setSort(item.value)}
           >
             {item.label}
           </button>

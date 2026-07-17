@@ -517,8 +517,7 @@ textarea[readonly] {
   padding: 8px 10px;
 }
 
-.feed-channel-bar,
-.feed-sort-bar {
+.feed-channel-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -526,8 +525,7 @@ textarea[readonly] {
   padding-bottom: 0;
 }
 
-.feed-channel-bar button,
-.feed-sort-bar button {
+.feed-channel-bar button {
   flex: 0 0 auto;
   border-radius: 999px;
 }

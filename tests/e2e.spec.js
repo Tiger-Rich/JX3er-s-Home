@@ -116,6 +116,7 @@ test('user browses feed channels and toggles a heart reaction', async ({ page })
     page.waitForResponse((response) =>
       response.url().includes('/api/requests') &&
       response.url().includes('channel=latest') &&
+      response.url().includes('sort=latest') &&
       response.ok(),
     ),
     latestChannel.click(),

@@ -7,11 +7,6 @@ export const feedChannels = [
   { value: 'trade', label: '买卖交易' },
 ];
 
-export const feedSorts = [
-  { value: 'recommended', label: '推荐' },
-  { value: 'latest', label: '最新' },
-];
-
 function compactFacts(facts) {
   return facts.filter(({ value }) => Boolean(value)).slice(0, 3);
 }

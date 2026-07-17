@@ -1803,35 +1803,27 @@ describe('user workflow pages', () => {
     });
   });
 
-  it('keeps Latest channel sort selection aligned with its effective query', async () => {
+  it('uses one top-level feed tab row and derives sorting from the selected tab', async () => {
     fetch.mockImplementation(() => Promise.resolve(jsonResponse({ requests: [] })));
     const user = userEvent.setup();
     render(<FeedPage onSelectRequest={() => {}} />);
 
     await screen.findByRole('heading', { name: '万事广场' });
+    expect(screen.queryByRole('group', { name: '委托排序' })).not.toBeInTheDocument();
+
     await user.click(within(screen.getByRole('group', { name: '万事广场频道' }))
       .getByRole('button', { name: '最新' }));
-
-    const sorts = within(screen.getByRole('group', { name: '委托排序' }));
-    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
-      '/api/requests?channel=latest&sort=recommended',
-      expect.any(Object),
-    ));
-    expect(sorts.getByRole('button', { name: '推荐' })).toHaveClass('button-primary');
-
-    await user.click(sorts.getByRole('button', { name: '最新' }));
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
       '/api/requests?channel=latest&sort=latest',
       expect.any(Object),
     ));
-    expect(sorts.getByRole('button', { name: '最新' })).toHaveClass('button-primary');
 
-    await user.click(sorts.getByRole('button', { name: '推荐' }));
+    await user.click(within(screen.getByRole('group', { name: '万事广场频道' }))
+      .getByRole('button', { name: '推荐' }));
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
-      '/api/requests?channel=latest&sort=recommended',
+      '/api/requests?channel=recommended&sort=recommended',
       expect.any(Object),
     ));
-    expect(sorts.getByRole('button', { name: '推荐' })).toHaveClass('button-primary');
   });
 
   it('renders feed channels, typed card facts, and heart counts without forbidden copy', async () => {
