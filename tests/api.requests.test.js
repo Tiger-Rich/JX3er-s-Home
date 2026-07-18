@@ -1414,6 +1414,116 @@ describe('request, contact, and admin API', () => {
     expectNoKeys(all.body, ['contactValue', 'passwordHash', 'openid']);
   });
 
+  it('lets admins dismiss pending request reports or take down approved requests', async () => {
+    const dismissedRequestId = insertRequest({ status: 'approved' });
+    const takenDownRequestId = insertRequest({ status: 'approved' });
+    const dismissReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'request', ?, ?)",
+    ).run(users.wanhua, dismissedRequestId, 'Not actionable').lastInsertRowid);
+    const takedownReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'request', ?, ?)",
+    ).run(users.wanhua, takenDownRequestId, 'Policy violation').lastInsertRowid);
+
+    const dismissed = await request(app)
+      .post(`/api/admin/reports/${dismissReportId}/dismiss`)
+      .set(auth(users.admin))
+      .send({ resultNote: 'Reviewed and dismissed' });
+    const takenDown = await request(app)
+      .post(`/api/admin/reports/${takedownReportId}/takedown`)
+      .set(auth(users.admin))
+      .send({ resultNote: 'Confirmed violation' });
+
+    expect(dismissed.status).toBe(200);
+    expect(dismissed.body.report).toMatchObject({
+      id: dismissReportId,
+      status: 'dismissed',
+      handlerId: users.admin,
+      handledAt: expect.any(String),
+      resultNote: 'Reviewed and dismissed',
+    });
+    expect(db.prepare('SELECT status, takedownReason FROM requests WHERE id = ?').get(dismissedRequestId))
+      .toEqual({ status: 'approved', takedownReason: null });
+    expect(takenDown.status).toBe(200);
+    expect(takenDown.body.report).toMatchObject({
+      id: takedownReportId,
+      status: 'resolved',
+      handlerId: users.admin,
+      handledAt: expect.any(String),
+      resultNote: 'Confirmed violation',
+    });
+    expect(takenDown.body.request).toMatchObject({
+      id: takenDownRequestId,
+      status: 'taken_down',
+      takedownReason: 'Confirmed violation',
+    });
+  });
+
+  it('rejects invalid report decisions without partially updating either record', async () => {
+    const approvedRequestId = insertRequest({ status: 'approved' });
+    const pendingRequestId = insertRequest({ status: 'pending' });
+    const resolvedReportRequestId = insertRequest({ status: 'approved' });
+    const dismissReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'request', ?, ?)",
+    ).run(users.wanhua, approvedRequestId, 'Dismiss me').lastInsertRowid);
+    const pendingRequestReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'request', ?, ?)",
+    ).run(users.wanhua, pendingRequestId, 'Request is pending').lastInsertRowid);
+    const resolvedReportId = Number(db.prepare(
+      `INSERT INTO reports (reporterId, targetType, targetId, reason, status)
+       VALUES (?, 'request', ?, ?, 'resolved')`,
+    ).run(users.wanhua, resolvedReportRequestId, 'Already decided').lastInsertRowid);
+    const userReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'user', ?, ?)",
+    ).run(users.wanhua, users.qixiu, 'User report').lastInsertRowid);
+
+    const nonAdmin = await request(app)
+      .post(`/api/admin/reports/${dismissReportId}/dismiss`)
+      .set(auth(users.qixiu))
+      .send({ resultNote: 'Not allowed' });
+    const missingNote = await request(app)
+      .post(`/api/admin/reports/${dismissReportId}/dismiss`)
+      .set(auth(users.admin))
+      .send({ resultNote: '   ' });
+    const pendingRequest = await request(app)
+      .post(`/api/admin/reports/${pendingRequestReportId}/takedown`)
+      .set(auth(users.admin))
+      .send({ resultNote: 'Would take down' });
+    const resolvedReport = await request(app)
+      .post(`/api/admin/reports/${resolvedReportId}/takedown`)
+      .set(auth(users.admin))
+      .send({ resultNote: 'Would take down' });
+    const userReport = await request(app)
+      .post(`/api/admin/reports/${userReportId}/dismiss`)
+      .set(auth(users.admin))
+      .send({ resultNote: 'Not a request report' });
+    const dismissed = await request(app)
+      .post(`/api/admin/reports/${dismissReportId}/dismiss`)
+      .set(auth(users.admin))
+      .send({ resultNote: 'Decision recorded' });
+    const repeated = await request(app)
+      .post(`/api/admin/reports/${dismissReportId}/dismiss`)
+      .set(auth(users.admin))
+      .send({ resultNote: 'Second decision' });
+
+    expect(nonAdmin.status).toBe(403);
+    expect(missingNote.status).toBe(400);
+    expect(pendingRequest.status).toBe(409);
+    expect(resolvedReport.status).toBe(409);
+    expect(userReport.status).toBe(404);
+    expect(dismissed.status).toBe(200);
+    expect(repeated.status).toBe(409);
+    expect(db.prepare('SELECT status FROM reports WHERE id = ?').get(pendingRequestReportId).status)
+      .toBe('pending');
+    expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(pendingRequestId).status)
+      .toBe('pending');
+    expect(db.prepare('SELECT status FROM reports WHERE id = ?').get(resolvedReportId).status)
+      .toBe('resolved');
+    expect(db.prepare('SELECT status, takedownReason FROM requests WHERE id = ?').get(resolvedReportRequestId))
+      .toEqual({ status: 'approved', takedownReason: null });
+    expect(db.prepare('SELECT status FROM reports WHERE id = ?').get(userReportId).status)
+      .toBe('pending');
+  });
+
   it('shows verification contact only to authenticated administrators', async () => {
     const pendingId = insertUser({
       account: 'verification-pending',

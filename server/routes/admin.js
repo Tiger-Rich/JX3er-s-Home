@@ -202,6 +202,17 @@ function reportDto(row) {
   };
 }
 
+function loadRequestReportWithImages(db, reportId) {
+  const row = db
+    .prepare(`${ADMIN_REPORT_QUERY} AND report.id = ?`)
+    .get(reportId);
+  if (!row) return null;
+  return reportDto({
+    ...row,
+    images: loadImagesForRequests(db, [row.id]).get(row.id) ?? [],
+  });
+}
+
 function loadVerification(db, userId) {
   return db.prepare(`${VERIFICATION_QUERY} WHERE v.userId = ?`).get(userId);
 }
@@ -301,6 +312,62 @@ export function createAdminRouter(db) {
       return next(error);
     }
   });
+
+  function handleRequestReport(action) {
+    return (req, res, next) => {
+      try {
+        const reportId = positiveId(req.params.id);
+        const resultNote = requiredText(req.body?.resultNote, 'resultNote');
+        const report = loadRequestReportWithImages(db, reportId);
+        if (!report) {
+          return res.status(404).json({ error: 'Request report not found' });
+        }
+
+        if (action === 'dismiss') {
+          const update = db.prepare(
+            `UPDATE reports
+             SET status = 'dismissed', handlerId = ?, handledAt = CURRENT_TIMESTAMP,
+                 resultNote = ?
+             WHERE id = ? AND targetType = 'request' AND status = 'pending'`,
+          ).run(req.user.id, resultNote, reportId);
+          if (update.changes === 0) {
+            return res.status(409).json({ error: 'Report cannot be handled in its current state' });
+          }
+          return res.json({ report: loadRequestReportWithImages(db, reportId) });
+        }
+
+        db.transaction(() => {
+          const requestUpdate = db.prepare(
+            `UPDATE requests
+             SET status = 'taken_down', takedownReason = ?, updatedAt = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'approved'`,
+          ).run(resultNote, report.targetId);
+          if (requestUpdate.changes === 0) {
+            throw clientError(409, 'Request cannot be taken down in its current state');
+          }
+          const reportUpdate = db.prepare(
+            `UPDATE reports
+             SET status = 'resolved', handlerId = ?, handledAt = CURRENT_TIMESTAMP,
+                 resultNote = ?
+             WHERE id = ? AND targetType = 'request' AND status = 'pending'`,
+          ).run(req.user.id, resultNote, reportId);
+          if (reportUpdate.changes === 0) {
+            throw clientError(409, 'Report cannot be handled in its current state');
+          }
+        })();
+
+        return res.json({
+          report: loadRequestReportWithImages(db, reportId),
+          request: reviewedRequestDto(loadReviewedRequestWithImages(db, report.targetId)),
+        });
+      } catch (error) {
+        return next(error);
+      }
+    };
+  }
+
+  router.post('/reports/:id/dismiss', handleRequestReport('dismiss'));
+  router.post('/reports/:id/takedown', handleRequestReport('takedown'));
 
   router.get('/requests', (req, res, next) => {
     try {
