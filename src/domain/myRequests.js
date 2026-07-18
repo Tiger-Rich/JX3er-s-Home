@@ -12,6 +12,6 @@ export const myRequestFilters = [
 export function myRequestActions(request) {
   if (request.status === 'pending') return ['withdraw'];
   if (request.status === 'approved') return ['close'];
-  if (request.status === 'closed') return ['hide'];
+  if (request.status === 'closed' || request.status === 'withdrawn') return ['hide'];
   return [];
 }

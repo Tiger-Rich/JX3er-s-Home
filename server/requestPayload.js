@@ -1,5 +1,6 @@
 import {
   buildRequestDescription,
+  requestBudgetOrReward,
   normalizeRequestDetails,
   requestIndustry,
 } from './requestDetails.js';
@@ -102,7 +103,11 @@ export function buildRequestValuesFromBody(ownerId, body, { multipart = false } 
     city,
     remote: remote ? 1 : 0,
     industry: requestIndustry(type, details, optionalText(body.industry, 'industry', 120)),
-    budgetOrReward: optionalText(body.budgetOrReward, 'budgetOrReward', 500),
+    budgetOrReward: requestBudgetOrReward(
+      type,
+      details,
+      optionalText(body.budgetOrReward, 'budgetOrReward', 500),
+    ),
     expiresAt: futureUtcIso(body.expiresAt),
   };
 }

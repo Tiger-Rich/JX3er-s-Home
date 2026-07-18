@@ -23,6 +23,14 @@ const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const maxTradeImages = 6;
 const maxImageBytes = 5 * 1024 * 1024;
 
+function RequiredMark() {
+  return <span className="required-mark" aria-hidden="true">*</span>;
+}
+
+function labelText(text, required = false) {
+  return <span>{text}{required && <RequiredMark />}</span>;
+}
+
 function cleanDetailsForSubmit(type, details) {
   return Object.fromEntries([
     ...(requestDetailSchemas[type] ?? []).map((field) => [field.name, details[field.name]?.trim() ?? '']),
@@ -220,8 +228,8 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
       remote: form.remote,
       expiresAt: expiry.toISOString(),
       details: cleanDetails,
-      industry: form.industry,
-      budgetOrReward: form.budgetOrReward,
+      industry: '',
+      budgetOrReward: '',
     };
     const payload = new FormData();
     if (!editing) {
@@ -231,8 +239,8 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
       payload.append('remote', String(form.remote));
       payload.append('expiresAt', expiry.toISOString());
       payload.append('details', JSON.stringify(cleanDetails));
-      payload.append('industry', form.industry.trim());
-      payload.append('budgetOrReward', form.budgetOrReward.trim());
+      payload.append('industry', '');
+      payload.append('budgetOrReward', '');
       if (form.type === 'trade') {
         for (const image of images) payload.append('images', image.file);
       }
@@ -276,8 +284,8 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
       <p className="boundary-copy">万事屋不接账号交易、代练、外挂、私服相关委托，也不承诺求职或交易结果。</p>
       {!approved && <p role="status" className="attention-copy">请点击我的名片提交认证</p>}
       <form onSubmit={submit} noValidate>
-        <label>类型<select name="type" value={form.type} onChange={update} required disabled={hasExistingImages}>{requestTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
-        <label>标题<input name="title" value={form.title} onChange={update} required maxLength={160} /></label>
+        <label>{labelText('类型', true)}<select aria-label="类型" name="type" value={form.type} onChange={update} required disabled={hasExistingImages}>{requestTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
+        <label>{labelText('标题', true)}<input aria-label="标题" name="title" value={form.title} onChange={update} required maxLength={160} /></label>
         <div className="typed-fields">
           {(requestDetailSchemas[form.type] ?? []).map((field) => {
             const inputProps = {
@@ -286,15 +294,17 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
               onChange: updateDetail,
               maxLength: 800,
               required: field.required,
+              placeholder: field.placeholder,
+              'aria-label': field.label,
             };
             return (
               <label key={field.name}>
-                {field.label}
+                {labelText(field.label, field.required)}
                 {field.multiline ? <textarea {...inputProps} /> : <input {...inputProps} />}
               </label>
             );
           })}
-          <label>补充说明（选填）<textarea name="extraNote" value={details.extraNote ?? ''} onChange={updateDetail} maxLength={800} /></label>
+          <label>{labelText('补充说明（选填）')}<textarea aria-label="补充说明（选填）" name="extraNote" value={details.extraNote ?? ''} onChange={updateDetail} maxLength={800} /></label>
         </div>
         {form.type === 'trade' && (
           <div className="image-upload-field">
@@ -314,11 +324,9 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
             )}
           </div>
         )}
-        <label>行业<input name="industry" value={form.industry} onChange={update} maxLength={120} /></label>
-        <label>预算/回报<input name="budgetOrReward" value={form.budgetOrReward} onChange={update} maxLength={500} /></label>
         <label>城市<input name="city" value={form.city} onChange={update} maxLength={80} /></label>
         <label className="checkbox-field"><input name="remote" type="checkbox" checked={form.remote} onChange={update} />可远程</label>
-        <label>有效期<input name="expiresAt" type="datetime-local" value={form.expiresAt} onChange={update} required /></label>
+        <label>{labelText('有效期', true)}<input aria-label="有效期" name="expiresAt" type="datetime-local" value={form.expiresAt} onChange={update} required /></label>
         <button type="submit" disabled={!approved || submitting || editLoading} className="button-primary">
           <Send aria-hidden="true" size={18} />{editing ? '重新提交审核' : '发布委托'}
         </button>

@@ -193,17 +193,21 @@ describe('MyRequestsPage', () => {
     expect(onEditRequest).toHaveBeenCalledWith(303);
   });
 
-  it('withdraws, closes, and hides owner requests from the list', async () => {
+  it('confirms, withdraws, closes, and hides owner requests from the list', async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
     fetch
       .mockResolvedValueOnce(jsonResponse({
         requests: [
           { id: 401, type: 'other', title: '待审', status: 'pending', expiresAt: '2099-01-01T00:00:00.000Z' },
           { id: 402, type: 'other', title: '发布中', status: 'approved', expiresAt: '2099-01-01T00:00:00.000Z' },
           { id: 403, type: 'other', title: '已关闭', status: 'closed', expiresAt: '2099-01-01T00:00:00.000Z' },
+          { id: 405, type: 'other', title: '已撤回', status: 'withdrawn', expiresAt: '2099-01-01T00:00:00.000Z' },
         ],
       }))
       .mockResolvedValueOnce(jsonResponse({ request: { id: 401, title: '待审', status: 'withdrawn' } }))
       .mockResolvedValueOnce(jsonResponse({ request: { id: 402, title: '发布中', status: 'closed' } }))
+      .mockResolvedValueOnce(jsonResponse({ hidden: true }))
       .mockResolvedValueOnce(jsonResponse({ hidden: true }));
     const user = userEvent.setup();
 
@@ -212,12 +216,33 @@ describe('MyRequestsPage', () => {
     await user.click(await screen.findByRole('button', { name: '撤回委托：待审' }));
     await user.click(screen.getByRole('button', { name: '关闭委托：发布中' }));
     await user.click(screen.getByRole('button', { name: '删除委托：已关闭' }));
+    await user.click(screen.getByRole('button', { name: '删除委托：已撤回' }));
 
+    expect(confirm).toHaveBeenCalledTimes(4);
     expect(fetch).toHaveBeenCalledWith('/api/my/requests/401/withdraw', expect.objectContaining({ method: 'POST' }));
     expect(fetch).toHaveBeenCalledWith('/api/my/requests/402/close', expect.objectContaining({ method: 'POST' }));
     expect(fetch).toHaveBeenCalledWith('/api/my/requests/403/hide', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenCalledWith('/api/my/requests/405/hide', expect.objectContaining({ method: 'POST' }));
     expect(screen.queryByRole('heading', { name: '已关闭' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '已撤回' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '删除委托：已关闭' })).not.toBeInTheDocument();
+  });
+
+  it('does not mutate owner requests when a lifecycle confirmation is cancelled', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    fetch.mockResolvedValueOnce(jsonResponse({
+      requests: [
+        { id: 406, type: 'other', title: '取消撤回', status: 'pending', expiresAt: '2099-01-01T00:00:00.000Z' },
+      ],
+    }));
+    const user = userEvent.setup();
+
+    render(<MyRequestsPage onSelectRequest={vi.fn()} onEditRequest={vi.fn()} onCreateRequest={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: '撤回委托：取消撤回' }));
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { name: '取消撤回' })).toBeVisible();
   });
 
   it('removes a withdrawn request from an active pending filter', async () => {
@@ -1130,6 +1155,34 @@ describe('user workflow pages', () => {
     expect(screen.getByLabelText('补充说明（选填）')).toBeVisible();
   });
 
+  it('marks required create fields and keeps type-specific common fields sensible', async () => {
+    const user = userEvent.setup();
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    expect(screen.getByText('类型').querySelector('.required-mark')).toHaveTextContent('*');
+    expect(screen.getByText('标题').querySelector('.required-mark')).toHaveTextContent('*');
+    expect(screen.getByText('目标岗位').querySelector('.required-mark')).toHaveTextContent('*');
+    expect(screen.getByText('补充说明（选填）').querySelector('.required-mark')).toBeNull();
+    expect(screen.queryByLabelText('行业')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('预算/回报')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('类型'), 'trade');
+    expect(screen.queryByLabelText('行业')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('预算/回报')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('售后边界')).toHaveAttribute(
+      'placeholder',
+      '例：签收后 24 小时内可沟通破损问题，生鲜不支持无理由退换。',
+    );
+
+    await user.selectOptions(screen.getByLabelText('类型'), 'commission');
+    expect(screen.queryByLabelText('行业')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('预算/回报')).toBeVisible();
+
+    await user.selectOptions(screen.getByLabelText('类型'), 'other');
+    expect(screen.getByLabelText('委托内容')).toBeVisible();
+    expect(screen.queryByLabelText('希望对方怎么帮')).not.toBeInTheDocument();
+  });
+
   it('validates required publishing fields and the city or remote rule', async () => {
     const user = userEvent.setup();
     render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
@@ -1206,8 +1259,8 @@ describe('user workflow pages', () => {
       title: '新标题',
       city: '杭州',
       remote: false,
-      industry: 'Technology',
-      budgetOrReward: 'Coffee',
+      industry: '',
+      budgetOrReward: '',
       details: {
         requestKind: '找同门',
         helpWanted: '一起做作品集',

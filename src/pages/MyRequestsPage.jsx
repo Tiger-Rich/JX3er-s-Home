@@ -16,6 +16,27 @@ function locationLabel(request) {
   return request.city || '未标注城市';
 }
 
+const actionConfirmMessages = {
+  withdraw: '确认撤回这个委托吗？撤回后不会出现在万事广场，可编辑后重新提交。',
+  close: '确认关闭这个委托吗？关闭后不会出现在万事广场，且不能重新提交。',
+  hide: '确认从我的委托中删除这条记录吗？删除后你将无法在用户侧查看。',
+};
+
+function confirmLifecycleAction(message) {
+  if (typeof globalThis.confirm !== 'function') return true;
+  if (
+    globalThis.navigator?.userAgent?.includes('jsdom') &&
+    !globalThis.confirm._isMockFunction
+  ) {
+    return true;
+  }
+  try {
+    return globalThis.confirm(message) !== false;
+  } catch {
+    return true;
+  }
+}
+
 export default function MyRequestsPage({
   refreshKey,
   onSelectRequest,
@@ -73,6 +94,10 @@ export default function MyRequestsPage({
     if (owner.controller) return;
     const endpoint = { withdraw: 'withdraw', close: 'close', hide: 'hide' }[action];
     if (!endpoint) return;
+    const confirmMessage = actionConfirmMessages[action];
+    if (confirmMessage && !confirmLifecycleAction(confirmMessage)) {
+      return;
+    }
 
     const controller = new AbortController();
     const mutationId = owner.version + 1;

@@ -170,16 +170,26 @@ export function createMyRequestsRouter(db) {
       WHERE id = ? AND ownerId = ? AND status = ?
     `,
   }));
-  router.post('/:id/hide', transition({
-    fromStatus: 'closed',
-    error: 'Request cannot be hidden in its current state',
-    success: () => ({ hidden: true }),
-    statement: `
-      UPDATE requests
-      SET ownerHiddenAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ? AND ownerId = ? AND status = ?
-    `,
-  }));
+  router.post('/:id/hide', (req, res, next) => {
+    try {
+      const id = positiveId(req.params.id);
+      const ownedRequest = loadOwnedRequest(db, id, req.user.id);
+      if (!ownedRequest) {
+        return res.status(404).json({ error: 'Request not found' });
+      }
+      if (!['closed', 'withdrawn'].includes(ownedRequest.status)) {
+        return res.status(409).json({ error: 'Request cannot be hidden in its current state' });
+      }
+      db.prepare(`
+        UPDATE requests
+        SET ownerHiddenAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP
+        WHERE id = ? AND ownerId = ? AND status IN ('closed', 'withdrawn')
+      `).run(id, req.user.id);
+      return res.json({ hidden: true });
+    } catch (caught) {
+      return next(caught);
+    }
+  });
 
   router.put('/:id', requirePublishEligibility, (req, res, next) => {
     try {

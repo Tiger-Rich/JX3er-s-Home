@@ -248,6 +248,7 @@ describe('request, contact, and admin API', () => {
   it('enforces owner request lifecycle transitions', async () => {
     const pendingId = insertRequest({ status: 'pending', title: 'Can withdraw' });
     const approvedId = insertRequest({ status: 'approved', title: 'Can close' });
+    const withdrawnId = insertRequest({ status: 'withdrawn', title: 'Can hide withdrawn' });
     const rejectedId = insertRequest({ status: 'rejected', title: 'Can resubmit' });
     const strangerId = insertUser({ account: 'my-request-stranger' });
 
@@ -263,6 +264,9 @@ describe('request, contact, and admin API', () => {
     const hide = await request(app)
       .post(`/api/my/requests/${approvedId}/hide`)
       .set(auth(users.qixiu));
+    const hideWithdrawn = await request(app)
+      .post(`/api/my/requests/${withdrawnId}/hide`)
+      .set(auth(users.qixiu));
     const stranger = await request(app)
       .post(`/api/my/requests/${rejectedId}/withdraw`)
       .set(auth(strangerId));
@@ -271,6 +275,7 @@ describe('request, contact, and admin API', () => {
     expect(withdrawApproved.status).toBe(409);
     expect(close.body.request).toMatchObject({ id: approvedId, status: 'closed' });
     expect(hide.body).toEqual({ hidden: true });
+    expect(hideWithdrawn.body).toEqual({ hidden: true });
     expect(stranger.status).toBe(404);
   });
 
@@ -402,7 +407,7 @@ describe('request, contact, and admin API', () => {
       type: 'commission',
       title: 'Need a portfolio review',
       description:
-        '委托内容：Portfolio review；交付物：Written feedback；预算：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
+        '委托内容：Portfolio review；交付物：Written feedback；预算/回报：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
       details: validDetails('commission'),
       status: 'pending',
       remote: false,
@@ -575,7 +580,7 @@ describe('request, contact, and admin API', () => {
     ],
     [
       'commission',
-      '委托内容：Portfolio review；交付物：Written feedback；预算：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
+      '委托内容：Portfolio review；交付物：Written feedback；预算/回报：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
       'Design',
     ],
     [
@@ -585,7 +590,7 @@ describe('request, contact, and admin API', () => {
     ],
     [
       'other',
-      '事情类型：Study group；希望帮助：Find peers for mock interviews；回报方式：Mutual practice；补充说明：Evenings preferred.',
+      '事情类型：Study group；委托内容：Find peers for mock interviews；回报方式：Mutual practice；补充说明：Evenings preferred.',
       'Design',
     ],
   ])(

@@ -63,6 +63,10 @@ test('uses a two-column note-card feed layout on mobile', async ({ page }) => {
 });
 
 test('user manages pending and approved requests from my requests', async ({ page }) => {
+  page.on('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+
   await page.goto('/');
   await page.locator('input[name="account"]').fill('qixiu');
   await page.locator('input[name="password"]').fill('test123');
