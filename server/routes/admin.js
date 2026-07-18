@@ -35,6 +35,42 @@ function requiredText(value, field, maxLength = 500) {
   return normalized;
 }
 
+function parseBatchReview(body) {
+  if (
+    !Array.isArray(body?.requestIds)
+    || body.requestIds.length === 0
+    || body.requestIds.length > 50
+  ) {
+    throw clientError(400, 'requestIds must contain 1 to 50 ids');
+  }
+  const requestIds = [...new Set(body.requestIds)];
+  if (requestIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+    throw clientError(400, 'requestIds must contain positive integer ids');
+  }
+  if (!['approve', 'reject'].includes(body.decision)) {
+    throw clientError(400, 'decision must be approve or reject');
+  }
+  return {
+    requestIds,
+    decision: body.decision,
+    reason: body.decision === 'reject' ? requiredText(body.reason, 'reason') : null,
+  };
+}
+
+function pendingApprovalCondition() {
+  return `AND datetime(expiresAt) > datetime('now')
+          AND EXISTS (
+            SELECT 1 FROM users owner
+            WHERE owner.id = requests.ownerId
+              AND owner.status = 'active'
+          )
+          AND EXISTS (
+            SELECT 1 FROM verifications ownerVerification
+            WHERE ownerVerification.userId = requests.ownerId
+              AND ownerVerification.status = 'approved'
+          )`;
+}
+
 function publicOwner(row) {
   return {
     nickname: row.ownerNickname,
@@ -442,19 +478,7 @@ export function createAdminRouter(db) {
         }
         values.push(id, fromStatus);
         const approvalCondition =
-          toStatus === 'approved'
-            ? `AND datetime(expiresAt) > datetime('now')
-               AND EXISTS (
-                 SELECT 1 FROM users owner
-                 WHERE owner.id = requests.ownerId
-                   AND owner.status = 'active'
-               )
-               AND EXISTS (
-                 SELECT 1 FROM verifications ownerVerification
-                 WHERE ownerVerification.userId = requests.ownerId
-                   AND ownerVerification.status = 'approved'
-               )`
-            : '';
+          toStatus === 'approved' ? pendingApprovalCondition() : '';
         const update = db
           .prepare(
             `UPDATE requests SET ${assignments.join(', ')}
@@ -475,6 +499,65 @@ export function createAdminRouter(db) {
       }
     };
   }
+
+  router.post('/requests/batch-review', (req, res, next) => {
+    try {
+      const { requestIds, decision, reason } = parseBatchReview(req.body);
+      const result = {
+        approvedCount: 0,
+        rejectedCount: 0,
+        skipped: [],
+        failed: [],
+      };
+      const findStatus = db.prepare('SELECT status FROM requests WHERE id = ?');
+      const update =
+        decision === 'approve'
+          ? db.prepare(
+            `UPDATE requests SET status = 'approved', updatedAt = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'pending'
+             ${pendingApprovalCondition()}`,
+          )
+          : db.prepare(
+            `UPDATE requests
+             SET status = 'rejected', rejectReason = ?, updatedAt = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'pending'`,
+          );
+
+      for (const id of requestIds) {
+        try {
+          const existing = findStatus.get(id);
+          if (!existing || existing.status !== 'pending') {
+            result.skipped.push({ id, reason: 'Request is not pending' });
+            continue;
+          }
+
+          const changes = decision === 'approve'
+            ? update.run(id).changes
+            : update.run(reason, id).changes;
+          if (changes > 0) {
+            if (decision === 'approve') result.approvedCount += 1;
+            else result.rejectedCount += 1;
+            continue;
+          }
+
+          const current = findStatus.get(id);
+          if (!current || current.status !== 'pending') {
+            result.skipped.push({ id, reason: 'Request is not pending' });
+          } else if (decision === 'approve') {
+            result.skipped.push({ id, reason: 'Request cannot be approved' });
+          } else {
+            result.failed.push({ id, reason: 'Request could not be rejected' });
+          }
+        } catch {
+          result.failed.push({ id, reason: 'Request could not be reviewed' });
+        }
+      }
+
+      return res.json(result);
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   router.post(
     '/requests/:id/approve',

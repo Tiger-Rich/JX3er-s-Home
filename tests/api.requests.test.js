@@ -1654,6 +1654,155 @@ describe('request, contact, and admin API', () => {
     expect(repeated.status).toBe(409);
   });
 
+  it('batch approves pending requests, deduplicates ids, and skips reviewed requests', async () => {
+    const alreadyApprovedId = insertRequest({ status: 'approved' });
+    const pendingId = insertRequest({ status: 'pending' });
+    const alsoApprovedId = insertRequest({ status: 'approved' });
+
+    const response = await request(app)
+      .post('/api/admin/requests/batch-review')
+      .set(auth(users.admin))
+      .send({
+        requestIds: [alreadyApprovedId, pendingId, alsoApprovedId, pendingId],
+        decision: 'approve',
+        reason: 'Ignored approval reason',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      approvedCount: 1,
+      rejectedCount: 0,
+      skipped: [
+        { id: alreadyApprovedId, reason: 'Request is not pending' },
+        { id: alsoApprovedId, reason: 'Request is not pending' },
+      ],
+      failed: [],
+    });
+    expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(pendingId).status)
+      .toBe('approved');
+  });
+
+  it('batch rejects pending requests with one normalized reason', async () => {
+    const firstPendingId = insertRequest({ status: 'pending' });
+    const secondPendingId = insertRequest({ status: 'pending' });
+
+    const response = await request(app)
+      .post('/api/admin/requests/batch-review')
+      .set(auth(users.admin))
+      .send({
+        requestIds: [firstPendingId, secondPendingId],
+        decision: 'reject',
+        reason: ' Outside scope ',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      approvedCount: 0,
+      rejectedCount: 2,
+      skipped: [],
+      failed: [],
+    });
+    expect(
+      db.prepare('SELECT status, rejectReason FROM requests WHERE id = ?').get(firstPendingId),
+    ).toEqual({ status: 'rejected', rejectReason: 'Outside scope' });
+    expect(
+      db.prepare('SELECT status, rejectReason FROM requests WHERE id = ?').get(secondPendingId),
+    ).toEqual({ status: 'rejected', rejectReason: 'Outside scope' });
+  });
+
+  it('skips batch approvals that fail current approval eligibility', async () => {
+    const expiredId = insertRequest({ status: 'pending', expiresAt: PAST });
+    const disabledOwnerId = insertUser({
+      account: 'batch-disabled-owner',
+      status: 'disabled',
+    });
+    const disabledOwnerRequestId = insertRequest({
+      ownerId: disabledOwnerId,
+      status: 'pending',
+    });
+    const unverifiedOwnerId = insertUser({
+      account: 'batch-unverified-owner',
+      verificationStatus: 'pending',
+    });
+    const unverifiedOwnerRequestId = insertRequest({
+      ownerId: unverifiedOwnerId,
+      status: 'pending',
+    });
+
+    const response = await request(app)
+      .post('/api/admin/requests/batch-review')
+      .set(auth(users.admin))
+      .send({
+        requestIds: [expiredId, disabledOwnerRequestId, unverifiedOwnerRequestId],
+        decision: 'approve',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      approvedCount: 0,
+      rejectedCount: 0,
+      skipped: [
+        { id: expiredId, reason: 'Request cannot be approved' },
+        { id: disabledOwnerRequestId, reason: 'Request cannot be approved' },
+        { id: unverifiedOwnerRequestId, reason: 'Request cannot be approved' },
+      ],
+      failed: [],
+    });
+    for (const id of [expiredId, disabledOwnerRequestId, unverifiedOwnerRequestId]) {
+      expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(id).status)
+        .toBe('pending');
+    }
+  });
+
+  it('allows only administrators to batch review requests', async () => {
+    const requestId = insertRequest({ status: 'pending' });
+
+    const response = await request(app)
+      .post('/api/admin/requests/batch-review')
+      .set(auth(users.qixiu))
+      .send({ requestIds: [requestId], decision: 'approve' });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: 'Administrator access required' });
+    expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(requestId).status)
+      .toBe('pending');
+  });
+
+  it.each([
+    [{ decision: 'approve' }, 'requestIds must contain 1 to 50 ids'],
+    [{ requestIds: [], decision: 'approve' }, 'requestIds must contain 1 to 50 ids'],
+    [
+      { requestIds: Array.from({ length: 51 }, (_, index) => index + 1), decision: 'approve' },
+      'requestIds must contain 1 to 50 ids',
+    ],
+    [{ requestIds: [0], decision: 'approve' }, 'requestIds must contain positive integer ids'],
+    [{ requestIds: [1.5], decision: 'approve' }, 'requestIds must contain positive integer ids'],
+    [{ requestIds: ['1'], decision: 'approve' }, 'requestIds must contain positive integer ids'],
+    [
+      { requestIds: [Number.MAX_SAFE_INTEGER + 1], decision: 'approve' },
+      'requestIds must contain positive integer ids',
+    ],
+    [{ requestIds: [1], decision: 'publish' }, 'decision must be approve or reject'],
+  ])('validates batch review payload %j', async (body, error) => {
+    const response = await request(app)
+      .post('/api/admin/requests/batch-review')
+      .set(auth(users.admin))
+      .send(body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error });
+  });
+
+  it('requires a nonblank reason to batch reject requests', async () => {
+    const response = await request(app)
+      .post('/api/admin/requests/batch-review')
+      .set(auth(users.admin))
+      .send({ requestIds: [1], decision: 'reject', reason: '   ' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'reason is required' });
+  });
+
   it.each(['not_submitted', 'rejected'])(
     'does not let an admin approve a pending request for a %s owner',
     async (verificationStatus) => {
