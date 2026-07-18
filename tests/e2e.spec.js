@@ -191,3 +191,34 @@ test('keeps feed content clear of the fixed bottom navigation on mobile', async 
   expect(cardBox).not.toBeNull();
   expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(navBox.y - 8);
 });
+
+test('admin handles a report and batch reviews pending requests', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('textbox', { name: '账号' }).fill('wanhua');
+  await page.getByLabel('密码').fill('test123');
+  await page.locator('form').getByRole('button', { name: '登录' }).click();
+
+  await page.getByRole('button', { name: '查看委托' }).first().click();
+  await page.getByLabel('举报原因').fill('疑似虚假信息，请掌柜核查。');
+  await page.getByRole('button', { name: '确认举报' }).click();
+  await expect(page.getByRole('status')).toContainText('举报已提交');
+  await page.getByRole('button', { name: '退出登录' }).click();
+
+  await page.getByRole('textbox', { name: '账号' }).fill('admin');
+  await page.getByLabel('密码').fill('admin123');
+  await page.locator('form').getByRole('button', { name: '登录' }).click();
+  await page.getByRole('button', { name: '举报处理' }).click();
+  await page.getByLabel(/举报 \d+ 处理说明/).fill('风险信息已下架。');
+  await page.getByRole('button', { name: '下架委托并完成处理' }).click();
+  await page.getByRole('button', { name: '确认下架并处理' }).click();
+  await expect(page.getByRole('status')).toContainText('举报处理已更新');
+
+  await page.getByRole('button', { name: '委托审核' }).click();
+  const selectable = page.getByRole('checkbox', { name: /选择委托/ });
+  await expect(selectable).toHaveCount(2);
+  await selectable.nth(0).check();
+  await selectable.nth(1).check();
+  await page.getByRole('button', { name: '批量通过 2 条' }).click();
+  await page.getByRole('button', { name: '确认批量通过' }).click();
+  await expect(page.getByRole('status')).toContainText('批量审核完成：通过 2 条');
+});
