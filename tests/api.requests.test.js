@@ -1308,6 +1308,112 @@ describe('request, contact, and admin API', () => {
     ).toBe(FUTURE);
   });
 
+  it('lets admins list request reports without contact details', async () => {
+    const pendingRequestId = insertRequest({
+      status: 'approved',
+      title: 'Reported request',
+    });
+    const resolvedRequestId = insertRequest({ status: 'approved' });
+    const dismissedRequestId = insertRequest({ status: 'approved' });
+    db.prepare(
+      `INSERT INTO request_images (requestId, url, mimeType, sizeBytes, sortOrder)
+       VALUES (?, ?, 'image/png', 12, 0)`,
+    ).run(pendingRequestId, '/uploads/request-images/reported.png');
+
+    const pendingReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'request', ?, ?)",
+    ).run(users.wanhua, pendingRequestId, 'Suspected false transaction').lastInsertRowid);
+    const resolvedReportId = Number(db.prepare(
+      `INSERT INTO reports
+         (reporterId, targetType, targetId, reason, status, handlerId, handledAt, resultNote)
+       VALUES (?, 'request', ?, ?, 'resolved', ?, ?, ?)`,
+    ).run(
+      users.wanhua,
+      resolvedRequestId,
+      'Resolved report',
+      users.admin,
+      '2025-01-02 03:04:05',
+      'Reviewed and resolved',
+    ).lastInsertRowid);
+    const dismissedReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason, status) VALUES (?, 'request', ?, ?, 'dismissed')",
+    ).run(users.wanhua, dismissedRequestId, 'Dismissed report').lastInsertRowid);
+    const nonRequestReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'user', ?, ?)",
+    ).run(users.wanhua, users.qixiu, 'User report').lastInsertRowid);
+    const missingRequestReportId = Number(db.prepare(
+      "INSERT INTO reports (reporterId, targetType, targetId, reason) VALUES (?, 'request', ?, ?)",
+    ).run(users.wanhua, 999999, 'Historical missing request').lastInsertRowid);
+    db.prepare('UPDATE reports SET createdAt = ? WHERE id = ?').run(
+      '2025-01-01 00:00:00',
+      pendingReportId,
+    );
+    db.prepare('UPDATE reports SET createdAt = ? WHERE id IN (?, ?)').run(
+      '2025-01-02 00:00:00',
+      resolvedReportId,
+      dismissedReportId,
+    );
+
+    const nonAdmin = await request(app)
+      .get('/api/admin/reports?status=pending')
+      .set(auth(users.qixiu));
+    const invalid = await request(app)
+      .get('/api/admin/reports?status=closed')
+      .set(auth(users.admin));
+    const pending = await request(app)
+      .get('/api/admin/reports?status=pending')
+      .set(auth(users.admin));
+    const resolved = await request(app)
+      .get('/api/admin/reports?status=resolved')
+      .set(auth(users.admin));
+    const dismissed = await request(app)
+      .get('/api/admin/reports?status=dismissed')
+      .set(auth(users.admin));
+    const all = await request(app).get('/api/admin/reports').set(auth(users.admin));
+
+    expect(nonAdmin.status).toBe(403);
+    expect(invalid.status).toBe(400);
+    expect(pending.status).toBe(200);
+    expect(pending.body.reports).toEqual([
+      expect.objectContaining({
+        id: pendingReportId,
+        reporterId: users.wanhua,
+        targetType: 'request',
+        targetId: pendingRequestId,
+        reason: 'Suspected false transaction',
+        status: 'pending',
+        handlerId: null,
+        handledAt: null,
+        resultNote: null,
+        request: expect.objectContaining({
+          id: pendingRequestId,
+          title: 'Reported request',
+          images: [expect.objectContaining({ url: '/uploads/request-images/reported.png' })],
+        }),
+        reporter: expect.objectContaining({ id: users.wanhua }),
+        handler: null,
+      }),
+    ]);
+    expect(resolved.body.reports.map(({ id }) => id)).toEqual([resolvedReportId]);
+    expect(resolved.body.reports[0]).toMatchObject({
+      status: 'resolved',
+      handlerId: users.admin,
+      handledAt: '2025-01-02 03:04:05',
+      resultNote: 'Reviewed and resolved',
+      handler: { id: users.admin, nickname: expect.any(String) },
+    });
+    expect(dismissed.body.reports.map(({ id }) => id)).toEqual([dismissedReportId]);
+    expect(all.body.reports.map(({ id }) => id)).toEqual([
+      dismissedReportId,
+      resolvedReportId,
+      pendingReportId,
+    ]);
+    expect(all.body.reports.map(({ id }) => id)).not.toEqual(
+      expect.arrayContaining([nonRequestReportId, missingRequestReportId]),
+    );
+    expectNoKeys(all.body, ['contactValue', 'passwordHash', 'openid']);
+  });
+
   it('shows verification contact only to authenticated administrators', async () => {
     const pendingId = insertUser({
       account: 'verification-pending',

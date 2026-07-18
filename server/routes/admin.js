@@ -145,6 +145,63 @@ const VERIFICATION_QUERY = `
   LEFT JOIN profiles p ON p.userId = u.id
 `;
 
+const REPORT_STATUSES = ['pending', 'resolved', 'dismissed'];
+
+const ADMIN_REPORT_QUERY = `
+  SELECT report.id AS reportId, report.reporterId, report.targetType, report.targetId,
+         report.reason, report.status, report.handlerId, report.handledAt,
+         report.resultNote, report.createdAt,
+         reporter.id AS reporterUserId, reporter.nickname AS reporterNickname,
+         handler.id AS handlerUserId, handler.nickname AS handlerNickname,
+         r.id, r.ownerId, r.type, r.title, r.description, r.details,
+         r.city, r.remote, r.industry, r.budgetOrReward, r.expiresAt, r.status AS requestStatus,
+         r.rejectReason, r.takedownReason, r.createdAt AS requestCreatedAt,
+         r.updatedAt AS requestUpdatedAt, u.nickname AS ownerNickname, u.city AS ownerCity,
+         p.server AS ownerServer, p.gameNickname AS ownerGameNickname,
+         p.sect AS ownerSect, p.startedYear AS ownerStartedYear,
+         p.industry AS ownerIndustry, p.occupation AS ownerOccupation,
+         COALESCE(v.status, 'not_submitted') AS ownerVerificationStatus
+  FROM reports report
+  JOIN requests r ON r.id = report.targetId
+  JOIN users reporter ON reporter.id = report.reporterId
+  LEFT JOIN users handler ON handler.id = report.handlerId
+  JOIN users u ON u.id = r.ownerId
+  LEFT JOIN profiles p ON p.userId = u.id
+  LEFT JOIN verifications v ON v.userId = u.id
+  WHERE report.targetType = 'request'
+`;
+
+function reportDto(row) {
+  return {
+    id: row.reportId,
+    reporterId: row.reporterId,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    reason: row.reason,
+    status: row.status,
+    handlerId: row.handlerId,
+    handledAt: row.handledAt,
+    resultNote: row.resultNote,
+    createdAt: row.createdAt,
+    reporter: {
+      id: row.reporterUserId,
+      nickname: row.reporterNickname,
+    },
+    handler: row.handlerUserId === null
+      ? null
+      : {
+        id: row.handlerUserId,
+        nickname: row.handlerNickname,
+      },
+    request: reviewedRequestDto({
+      ...row,
+      status: row.requestStatus,
+      createdAt: row.requestCreatedAt,
+      updatedAt: row.requestUpdatedAt,
+    }),
+  };
+}
+
 function loadVerification(db, userId) {
   return db.prepare(`${VERIFICATION_QUERY} WHERE v.userId = ?`).get(userId);
 }
@@ -215,6 +272,35 @@ export function createAdminRouter(db) {
 
   router.post('/verifications/:userId/approve', reviewVerification('approved'));
   router.post('/verifications/:userId/reject', reviewVerification('rejected'));
+
+  router.get('/reports', (req, res, next) => {
+    try {
+      const values = [];
+      let statusFilter = '';
+      if (req.query.status !== undefined) {
+        if (!REPORT_STATUSES.includes(req.query.status)) {
+          throw clientError(400, 'Invalid report status');
+        }
+        statusFilter = ' AND report.status = ?';
+        values.push(req.query.status);
+      }
+      const rows = db
+        .prepare(`${ADMIN_REPORT_QUERY}${statusFilter} ORDER BY report.createdAt DESC, report.id DESC`)
+        .all(...values);
+      const imagesByRequestId = loadImagesForRequests(
+        db,
+        rows.map((row) => row.id),
+      );
+      return res.json({
+        reports: rows.map((row) => reportDto({
+          ...row,
+          images: imagesByRequestId.get(row.id) ?? [],
+        })),
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   router.get('/requests', (req, res, next) => {
     try {
