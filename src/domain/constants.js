@@ -31,6 +31,12 @@ export const applicationStatusLabels = {
   rejected: '暂不合适',
 };
 
+export const reportStatusLabels = {
+  pending: '待处理',
+  resolved: '已处置',
+  dismissed: '无需处置',
+};
+
 export const profileLabels = {
   title: '我的名片',
 };

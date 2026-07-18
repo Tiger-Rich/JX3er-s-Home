@@ -1,9 +1,10 @@
 import React from 'react';
-import { ClipboardCheck, FileCheck2, LogOut, UsersRound } from 'lucide-react';
+import { ClipboardCheck, FileCheck2, LogOut, ShieldAlert, UsersRound } from 'lucide-react';
 
 const navigation = [
   { id: 'verifications', label: '认证审核', Icon: ClipboardCheck },
   { id: 'requests', label: '委托审核', Icon: FileCheck2 },
+  { id: 'reports', label: '举报处理', Icon: ShieldAlert },
   { id: 'users', label: '用户列表', Icon: UsersRound },
 ];
 

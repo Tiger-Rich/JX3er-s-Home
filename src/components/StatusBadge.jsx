@@ -2,12 +2,14 @@ import React from 'react';
 
 import {
   applicationStatusLabels,
+  reportStatusLabels,
   requestStatusLabels,
   verificationLabels,
 } from '../domain/constants.js';
 
 const labelsByType = {
   application: applicationStatusLabels,
+  report: reportStatusLabels,
   request: requestStatusLabels,
   verification: verificationLabels,
 };
