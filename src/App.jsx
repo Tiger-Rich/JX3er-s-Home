@@ -6,6 +6,7 @@ import ContactPage from './pages/ContactPage.jsx';
 import CreateRequestPage from './pages/CreateRequestPage.jsx';
 import FeedPage from './pages/FeedPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import MyRequestsPage from './pages/MyRequestsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import RequestDetailPage from './pages/RequestDetailPage.jsx';
 import AdminDashboard from './pages/admin/AdminDashboard.jsx';
@@ -15,7 +16,10 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [activeTab, setActiveTab] = useState('feed');
   const [visitedTabs, setVisitedTabs] = useState(() => new Set(['feed']));
-  const [selectedRequestId, setSelectedRequestId] = useState(null);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [editingRequestId, setEditingRequestId] = useState(null);
+  const [feedRefreshKey, setFeedRefreshKey] = useState(0);
+  const [myRequestsRefreshKey, setMyRequestsRefreshKey] = useState(0);
   const mountedRef = useRef(false);
   const authenticationOwnerRef = useRef({ controller: null, version: 0 });
   const refreshOwnerRef = useRef({ controller: null, version: 0 });
@@ -33,6 +37,13 @@ export default function App() {
     owner.controller?.abort();
     owner.controller = null;
   }, []);
+
+  function resetUserWorkspace() {
+    setActiveTab('feed');
+    setVisitedTabs(new Set(['feed']));
+    setSelectedRequest(null);
+    setEditingRequestId(null);
+  }
 
   const refreshSession = useCallback(async () => {
     const owner = refreshOwnerRef.current;
@@ -75,6 +86,7 @@ export default function App() {
       cancelRefresh();
       setSession(null);
       setAuthError('');
+      resetUserWorkspace();
     });
     refreshSession();
     return () => {
@@ -103,6 +115,7 @@ export default function App() {
       });
       if (!mountedRef.current || owner.version !== requestId) return;
       setToken(result.token);
+      resetUserWorkspace();
       await refreshSession();
     } catch (error) {
       if (
@@ -122,14 +135,40 @@ export default function App() {
     setToken(null);
     setSession(null);
     setAuthError('');
+    resetUserWorkspace();
   }
 
   function handleTabChange(tab) {
+    if (tab === 'myRequests' && activeTab !== 'myRequests') {
+      setMyRequestsRefreshKey((current) => current + 1);
+    }
     setActiveTab(tab);
     setVisitedTabs((current) => {
       if (current.has(tab)) return current;
       return new Set([...current, tab]);
     });
+  }
+
+  function openCreateRequest() {
+    setEditingRequestId(null);
+    handleTabChange('create');
+  }
+
+  function handleRequestSelect(requestId) {
+    setSelectedRequest({ id: requestId, source: 'public' });
+    handleTabChange('feed');
+  }
+
+  function handleMyRequestSelect(requestId) {
+    setSelectedRequest({ id: requestId, source: 'owner' });
+    handleTabChange('feed');
+  }
+
+  function invalidateFeed() {
+    setFeedRefreshKey((current) => current + 1);
+    setSelectedRequest((current) => (
+      current?.source === 'public' ? null : current
+    ));
   }
 
   if (session === undefined) {
@@ -159,24 +198,59 @@ export default function App() {
   return (
     <AppShell
       activeTab={activeTab}
-      onTabChange={handleTabChange}
+      onTabChange={(tab) => {
+        if (tab === 'create') {
+          openCreateRequest();
+          return;
+        }
+        handleTabChange(tab);
+      }}
       onLogout={handleLogout}
     >
       {visitedTabs.has('feed') && (
         <div hidden={activeTab !== 'feed'}>
-          {selectedRequestId ? (
+          {selectedRequest ? (
             <RequestDetailPage
-              requestId={selectedRequestId}
+              requestId={selectedRequest.id}
               session={session}
-              onBack={() => setSelectedRequestId(null)}
+              mode={selectedRequest.source}
+              onBack={() => setSelectedRequest(null)}
             />
           ) : (
-            <FeedPage onSelectRequest={setSelectedRequestId} />
+            <FeedPage
+              refreshKey={feedRefreshKey}
+              onSelectRequest={handleRequestSelect}
+            />
           )}
         </div>
       )}
       {visitedTabs.has('create') && (
-        <div hidden={activeTab !== 'create'}><CreateRequestPage session={session} /></div>
+        <div hidden={activeTab !== 'create'}>
+          <CreateRequestPage
+            session={session}
+            editRequestId={editingRequestId}
+            onEditComplete={() => {
+              setEditingRequestId(null);
+              setMyRequestsRefreshKey((current) => current + 1);
+              invalidateFeed();
+              handleTabChange('myRequests');
+            }}
+          />
+        </div>
+      )}
+      {visitedTabs.has('myRequests') && (
+        <div hidden={activeTab !== 'myRequests'}>
+          <MyRequestsPage
+            refreshKey={myRequestsRefreshKey}
+            onSelectRequest={handleMyRequestSelect}
+            onCreateRequest={openCreateRequest}
+            onPublicVisibilityChange={invalidateFeed}
+            onEditRequest={(requestId) => {
+              setEditingRequestId(requestId);
+              handleTabChange('create');
+            }}
+          />
+        </div>
       )}
       {visitedTabs.has('contacts') && (
         <div hidden={activeTab !== 'contacts'}><ContactPage /></div>

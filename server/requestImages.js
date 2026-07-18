@@ -10,8 +10,8 @@ export const REQUEST_IMAGE_DIRECTORY = path.resolve(
   'uploads',
   'request-images',
 );
-export const MAX_TRADE_IMAGES = 6;
-export const MAX_TRADE_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_REQUEST_IMAGES = 6;
+export const MAX_REQUEST_IMAGE_BYTES = 5 * 1024 * 1024;
 export const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -62,8 +62,8 @@ const storage = multer.diskStorage({
 export const requestImageUpload = multer({
   storage,
   limits: {
-    fileSize: MAX_TRADE_IMAGE_BYTES,
-    files: MAX_TRADE_IMAGES,
+    fileSize: MAX_REQUEST_IMAGE_BYTES,
+    files: MAX_REQUEST_IMAGES,
   },
   fileFilter(_req, file, callback) {
     if (!ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
@@ -73,7 +73,7 @@ export const requestImageUpload = multer({
     }
     return callback(null, true);
   },
-}).array('images', MAX_TRADE_IMAGES);
+}).array('images', MAX_REQUEST_IMAGES);
 
 export function requestImageDto(row) {
   return {
@@ -125,4 +125,16 @@ export function loadImagesForRequests(db, requestIds) {
     imagesByRequestId.get(row.requestId)?.push(requestImageDto(row));
   }
   return imagesByRequestId;
+}
+
+export function deleteRequestImageFiles(db, requestId) {
+  const images = loadImagesForRequests(db, [requestId]).get(requestId) ?? [];
+  for (const image of images) {
+    const routePrefix = `${REQUEST_IMAGE_ROUTE}/`;
+    if (!image.url.startsWith(routePrefix)) continue;
+    const filename = image.url.slice(routePrefix.length);
+    const filePath = path.resolve(REQUEST_IMAGE_DIRECTORY, filename);
+    if (path.dirname(filePath) !== REQUEST_IMAGE_DIRECTORY) continue;
+    fs.rmSync(filePath, { force: true });
+  }
 }

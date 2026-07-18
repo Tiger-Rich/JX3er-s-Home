@@ -45,7 +45,7 @@ export const REQUEST_DETAIL_SCHEMAS = {
     summary: [
       ['commissionContent', '委托内容'],
       ['deliverables', '交付物'],
-      ['budget', '预算'],
+      ['budget', '预算/回报'],
       ['deadline', '交付时间'],
     ],
   },
@@ -64,7 +64,7 @@ export const REQUEST_DETAIL_SCHEMAS = {
     optional: ['background', 'constraints', 'extraNote'],
     summary: [
       ['requestKind', '事情类型'],
-      ['helpWanted', '希望帮助'],
+      ['helpWanted', '委托内容'],
       ['reward', '回报方式'],
     ],
   },
@@ -156,4 +156,12 @@ export function requestIndustry(type, details, fallback) {
     return details[schema.industryField] ?? fallback;
   }
   return fallback;
+}
+
+export function requestBudgetOrReward(type, details, fallback) {
+  if (type === 'commission') return details.budget ?? fallback;
+  if (type === 'industry_consulting') return details.reward ?? fallback;
+  if (type === 'local_help') return details.costShare ?? fallback;
+  if (type === 'other') return details.reward ?? fallback;
+  return null;
 }

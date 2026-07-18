@@ -1,10 +1,12 @@
 import request from 'supertest';
-import { rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../server/app.js';
 import { issueToken } from '../server/auth.js';
 import { createDatabase, seedDatabase } from '../server/db.js';
+import { REQUEST_IMAGE_DIRECTORY } from '../server/requestImages.js';
 
 const FUTURE = '2099-12-31T23:59:59.000Z';
 const PAST = '2020-01-01T00:00:00.000Z';
@@ -200,6 +202,203 @@ describe('request, contact, and admin API', () => {
     return call;
   }
 
+  it('lets owners list private lifecycle states and hides owner-hidden closed requests', async () => {
+    const pendingId = insertRequest({ status: 'pending', title: 'Pending mine' });
+    const closedId = insertRequest({ status: 'closed', title: 'Closed mine' });
+    const hiddenId = insertRequest({ status: 'closed', title: 'Hidden mine' });
+    db.prepare('UPDATE requests SET ownerHiddenAt = CURRENT_TIMESTAMP WHERE id = ?').run(hiddenId);
+
+    const response = await request(app)
+      .get('/api/my/requests')
+      .set(auth(users.qixiu));
+
+    expect(response.status).toBe(200);
+    expect(response.body.requests.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([pendingId, closedId]),
+    );
+    expect(response.body.requests.map(({ id }) => id)).not.toContain(hiddenId);
+    expect(response.body.requests).toContainEqual(expect.objectContaining({
+      id: closedId,
+      status: 'closed',
+      favoriteCount: expect.any(Number),
+      reactionCount: expect.any(Number),
+      applicationCount: expect.any(Number),
+    }));
+  });
+
+  it('keeps withdrawn, closed, and owner-hidden requests out of public results', async () => {
+    const withdrawnId = insertRequest({ status: 'withdrawn', title: 'Withdrawn public' });
+    const closedId = insertRequest({ status: 'closed', title: 'Closed public' });
+    const hiddenId = insertRequest({ title: 'Hidden public' });
+    db.prepare('UPDATE requests SET ownerHiddenAt = CURRENT_TIMESTAMP WHERE id = ?').run(hiddenId);
+
+    const feed = await request(app).get('/api/requests');
+    const withdrawn = await request(app).get(`/api/requests/${withdrawnId}`);
+    const closed = await request(app).get(`/api/requests/${closedId}`);
+    const hidden = await request(app).get(`/api/requests/${hiddenId}`);
+
+    expect(feed.body.requests.map(({ id }) => id)).not.toEqual(
+      expect.arrayContaining([withdrawnId, closedId, hiddenId]),
+    );
+    expect(withdrawn.status).toBe(404);
+    expect(closed.status).toBe(404);
+    expect(hidden.status).toBe(404);
+  });
+
+  it('enforces owner request lifecycle transitions', async () => {
+    const pendingId = insertRequest({ status: 'pending', title: 'Can withdraw' });
+    const approvedId = insertRequest({ status: 'approved', title: 'Can close' });
+    const withdrawnId = insertRequest({ status: 'withdrawn', title: 'Can hide withdrawn' });
+    const rejectedId = insertRequest({ status: 'rejected', title: 'Can resubmit' });
+    const strangerId = insertUser({ account: 'my-request-stranger' });
+
+    const withdraw = await request(app)
+      .post(`/api/my/requests/${pendingId}/withdraw`)
+      .set(auth(users.qixiu));
+    const withdrawApproved = await request(app)
+      .post(`/api/my/requests/${approvedId}/withdraw`)
+      .set(auth(users.qixiu));
+    const close = await request(app)
+      .post(`/api/my/requests/${approvedId}/close`)
+      .set(auth(users.qixiu));
+    const hide = await request(app)
+      .post(`/api/my/requests/${approvedId}/hide`)
+      .set(auth(users.qixiu));
+    const hideWithdrawn = await request(app)
+      .post(`/api/my/requests/${withdrawnId}/hide`)
+      .set(auth(users.qixiu));
+    const stranger = await request(app)
+      .post(`/api/my/requests/${rejectedId}/withdraw`)
+      .set(auth(strangerId));
+
+    expect(withdraw.body.request).toMatchObject({ id: pendingId, status: 'withdrawn' });
+    expect(withdrawApproved.status).toBe(409);
+    expect(close.body.request).toMatchObject({ id: approvedId, status: 'closed' });
+    expect(hide.body).toEqual({ hidden: true });
+    expect(hideWithdrawn.body).toEqual({ hidden: true });
+    expect(stranger.status).toBe(404);
+  });
+
+  it('resubmits withdrawn requests only and rejects direct edits for other states', async () => {
+    const withdrawnId = insertRequest({ status: 'withdrawn', title: 'Old withdrawn' });
+    const approvedId = insertRequest({ status: 'approved', title: 'Published' });
+    const rejectedId = insertRequest({ status: 'rejected', title: 'Rejected request' });
+
+    const resubmitted = await request(app)
+      .put(`/api/my/requests/${withdrawnId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Updated request',
+        city: 'Hangzhou',
+        remote: false,
+        industry: 'Technology',
+        budgetOrReward: 'Coffee',
+        expiresAt: FUTURE,
+        details: validDetails('other', { requestKind: 'Updated kind' }),
+      });
+    const illegal = await request(app)
+      .put(`/api/my/requests/${approvedId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Illegal update',
+        city: 'Hangzhou',
+        remote: false,
+        expiresAt: FUTURE,
+        details: validDetails('other'),
+      });
+    const rejected = await request(app)
+      .put(`/api/my/requests/${rejectedId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Rejected update',
+        city: 'Hangzhou',
+        remote: false,
+        industry: 'Technology',
+        budgetOrReward: 'Coffee',
+        expiresAt: FUTURE,
+        details: validDetails('other'),
+      });
+
+    expect(resubmitted.status).toBe(200);
+    expect(resubmitted.body.request).toMatchObject({
+      id: withdrawnId,
+      title: 'Updated request',
+      status: 'pending',
+      rejectReason: null,
+    });
+    expect(illegal.status).toBe(409);
+    expect(rejected.status).toBe(409);
+  });
+
+  it.each([
+    ['rejected', 'active', 403],
+    ['approved', 'disabled', 401],
+  ])(
+    'does not let a %s and %s owner resubmit a withdrawn request',
+    async (verificationStatus, accountStatus, expectedStatus) => {
+      const ownerId = insertUser({
+        account: `resubmit-${verificationStatus}-${accountStatus}`,
+        verificationStatus,
+        status: accountStatus,
+      });
+      const withdrawnId = insertRequest({ ownerId, status: 'withdrawn' });
+
+      const response = await request(app)
+        .put(`/api/my/requests/${withdrawnId}`)
+        .set(auth(ownerId))
+        .send({
+          type: 'other',
+          title: 'Must remain withdrawn',
+          city: 'Hangzhou',
+          remote: false,
+          industry: 'Technology',
+          budgetOrReward: 'Coffee',
+          expiresAt: FUTURE,
+          details: validDetails('other'),
+        });
+
+      expect(response.status).toBe(expectedStatus);
+      expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(withdrawnId).status)
+        .toBe('withdrawn');
+    },
+  );
+
+  it('allows resubmitting a withdrawn request with images as any request type', async () => {
+    const withdrawnId = insertRequest({ status: 'withdrawn', type: 'trade' });
+    db.prepare(
+      `INSERT INTO request_images (requestId, url, mimeType, sizeBytes, sortOrder)
+       VALUES (?, '/uploads/request-images/legacy.png', 'image/png', 12, 0)`,
+    ).run(withdrawnId);
+
+    const response = await request(app)
+      .put(`/api/my/requests/${withdrawnId}`)
+      .set(auth(users.qixiu))
+      .send({
+        type: 'other',
+        title: 'Resubmitted with cover',
+        city: 'Hangzhou',
+        remote: false,
+        industry: 'Technology',
+        budgetOrReward: 'Coffee',
+        expiresAt: FUTURE,
+        details: validDetails('other'),
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.request).toMatchObject({
+      status: 'pending',
+      type: 'other',
+      title: 'Resubmitted with cover',
+    });
+    expect(response.body.request.images).toHaveLength(1);
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM request_images WHERE requestId = ?').get(withdrawnId).count,
+    ).toBe(1);
+  });
+
   it('publishes a pending non-anonymous request for an approved owner', async () => {
     const response = await publish();
 
@@ -209,7 +408,7 @@ describe('request, contact, and admin API', () => {
       type: 'commission',
       title: 'Need a portfolio review',
       description:
-        '委托内容：Portfolio review；交付物：Written feedback；预算：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
+        '委托内容：Portfolio review；交付物：Written feedback；预算/回报：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
       details: validDetails('commission'),
       status: 'pending',
       remote: false,
@@ -297,7 +496,7 @@ describe('request, contact, and admin API', () => {
     );
   });
 
-  it('rejects images on non-trade multipart publications', async () => {
+  it('publishes non-trade cover images and returns them in public DTOs', async () => {
     const response = await multipartPublish(
       users.qixiu,
       {
@@ -316,8 +515,24 @@ describe('request, contact, and admin API', () => {
       ],
     );
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain('trade');
+    expect(response.status).toBe(201);
+    expect(response.body.request).toMatchObject({
+      type: 'commission',
+      images: [
+        expect.objectContaining({
+          url: expect.stringMatching(/^\/uploads\/request-images\/.+\.png$/),
+          mimeType: 'image/png',
+          sortOrder: 0,
+        }),
+      ],
+    });
+
+    await request(app)
+      .post(`/api/admin/requests/${response.body.request.id}/approve`)
+      .set(auth(users.admin));
+    const detail = await request(app).get(`/api/requests/${response.body.request.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.request.images).toEqual(response.body.request.images);
   });
 
   it('rejects unsupported trade image types', async () => {
@@ -343,15 +558,15 @@ describe('request, contact, and admin API', () => {
     expect(response.body.error).toContain('image');
   });
 
-  it('rejects more than six trade images', async () => {
+  it('rejects more than six request images', async () => {
     const response = await multipartPublish(
       users.qixiu,
       {
-        type: 'trade',
+        type: 'commission',
         title: 'Keyboard',
         remote: 'true',
         expiresAt: FUTURE,
-        details: validDetails('trade'),
+        details: validDetails('commission'),
       },
       Array.from({ length: 7 }, (_, index) => ({
         filename: `keyboard-${index}.png`,
@@ -382,7 +597,7 @@ describe('request, contact, and admin API', () => {
     ],
     [
       'commission',
-      '委托内容：Portfolio review；交付物：Written feedback；预算：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
+      '委托内容：Portfolio review；交付物：Written feedback；预算/回报：Coffee；交付时间：Next Friday；补充说明：Focus on storytelling.',
       'Design',
     ],
     [
@@ -392,7 +607,7 @@ describe('request, contact, and admin API', () => {
     ],
     [
       'other',
-      '事情类型：Study group；希望帮助：Find peers for mock interviews；回报方式：Mutual practice；补充说明：Evenings preferred.',
+      '事情类型：Study group；委托内容：Find peers for mock interviews；回报方式：Mutual practice；补充说明：Evenings preferred.',
       'Design',
     ],
   ])(
@@ -477,7 +692,7 @@ describe('request, contact, and admin API', () => {
     expectNoKeys(detail.body);
   });
 
-  it('prioritizes referral and consulting requests before newest other types', async () => {
+  it('keeps referral and consulting visible in recommended sorting without hiding newest sorting', async () => {
     db.prepare('DELETE FROM requests').run();
     const otherId = insertRequest({ type: 'other', title: 'Newest other' });
     const consultingId = insertRequest({
@@ -498,14 +713,151 @@ describe('request, contact, and admin API', () => {
       `UPDATE requests SET createdAt = '2098-01-01 00:00:00' WHERE id = ?`,
     ).run(referralId);
 
-    const response = await request(app).get('/api/requests');
+    const recommended = await request(app).get('/api/requests');
+    const latest = await request(app).get('/api/requests?sort=latest');
+
+    expect(recommended.status).toBe(200);
+    expect(recommended.body.requests.map(({ id }) => id).slice(0, 2)).toEqual([
+      referralId,
+      consultingId,
+    ]);
+    expect(latest.body.requests.map(({ id }) => id)).toEqual([
+      otherId,
+      consultingId,
+      referralId,
+    ]);
+  });
+
+  it('filters feed channels and supports latest ordering', async () => {
+    db.prepare('DELETE FROM requests').run();
+    const tradeId = insertRequest({ type: 'trade', title: 'Trade channel' });
+    const referralId = insertRequest({
+      type: 'job_referral',
+      title: 'Referral channel',
+    });
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-01 00:00:00' WHERE id = ?`,
+    ).run(tradeId);
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-02 00:00:00' WHERE id = ?`,
+    ).run(referralId);
+
+    const trade = await request(app).get('/api/requests?channel=trade');
+    const latest = await request(app).get('/api/requests?channel=latest&sort=latest');
+    const invalid = await request(app).get('/api/requests?channel=boosting');
+
+    expect(trade.status).toBe(200);
+    expect(trade.body.requests.map(({ id }) => id)).toEqual([tradeId]);
+    expect(latest.body.requests.map(({ id }) => id)).toEqual([
+      referralId,
+      tradeId,
+    ]);
+    expect(invalid.status).toBe(400);
+  });
+
+  it('uses reactions, favorites, applications, and self-heart exclusion in recommended ordering', async () => {
+    db.prepare('DELETE FROM contact_applications').run();
+    db.prepare('DELETE FROM favorites').run();
+    db.prepare('DELETE FROM request_reactions').run();
+    db.prepare('DELETE FROM requests').run();
+
+    const quietId = insertRequest({
+      title: 'Fresh quiet',
+      type: 'other',
+    });
+    const engagedId = insertRequest({
+      title: 'Engaged referral',
+      type: 'job_referral',
+    });
+    const selfHeartId = insertRequest({
+      title: 'Self heart only',
+      type: 'other',
+    });
+    const applicantId = insertUser({ account: 'ranking-applicant' });
+
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-03 00:00:00' WHERE id = ?`,
+    ).run(quietId);
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-02 00:00:00' WHERE id = ?`,
+    ).run(engagedId);
+    db.prepare(
+      `UPDATE requests SET createdAt = '2098-01-01 00:00:00' WHERE id = ?`,
+    ).run(selfHeartId);
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(users.wanhua, engagedId);
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(users.qixiu, selfHeartId);
+    db.prepare('INSERT INTO favorites (userId, requestId) VALUES (?, ?)').run(
+      users.wanhua,
+      engagedId,
+    );
+    db.prepare(
+      `INSERT INTO contact_applications
+         (requestId, applicantId, ownerId, message, status)
+       VALUES (?, ?, ?, 'Interested', 'pending')`,
+    ).run(engagedId, applicantId, users.qixiu);
+
+    const response = await request(app).get(
+      '/api/requests?channel=recommended&sort=recommended',
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.requests.map(({ id }) => id)[0]).toBe(engagedId);
+    expect(response.body.requests.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([quietId, selfHeartId]),
+    );
+    expect(JSON.stringify(response.body)).not.toContain('recommendationScore');
+  });
+
+  it('does not let an owner self-heart outrank an otherwise identical request', async () => {
+    db.prepare('DELETE FROM request_reactions').run();
+    db.prepare('DELETE FROM requests').run();
+
+    const selfHeartId = insertRequest({
+      title: 'Owner heart only',
+      type: 'other',
+      ownerId: users.qixiu,
+    });
+    const neutralId = insertRequest({
+      title: 'No hearts',
+      type: 'other',
+      ownerId: users.wanhua,
+    });
+    db.prepare(
+      `UPDATE requests SET createdAt = '2026-07-14 00:00:00' WHERE id IN (?, ?)`,
+    ).run(selfHeartId, neutralId);
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(users.qixiu, selfHeartId);
+
+    const response = await request(app).get(
+      '/api/requests?channel=recommended&sort=recommended',
+    );
 
     expect(response.status).toBe(200);
     expect(response.body.requests.map(({ id }) => id)).toEqual([
-      consultingId,
-      referralId,
-      otherId,
+      neutralId,
+      selfHeartId,
     ]);
+  });
+
+  it('returns a nearby metadata hint when the viewer city is unavailable', async () => {
+    const anonymous = await request(app).get('/api/requests?channel=nearby');
+    const viewer = await request(app)
+      .get('/api/requests?channel=nearby')
+      .set(auth(users.qixiu));
+
+    expect(anonymous.status).toBe(200);
+    expect(anonymous.body.meta).toMatchObject({ nearbyCityRequired: true });
+    expect(anonymous.body.requests).toEqual([]);
+    expect(viewer.status).toBe(200);
+    expect(viewer.body.meta).toMatchObject({
+      nearbyCityRequired: false,
+      nearbyCity: expect.any(String),
+    });
   });
 
   it('reveals only the counterparty contact after owner approval', async () => {
@@ -713,6 +1065,98 @@ describe('request, contact, and admin API', () => {
         )
         .get(users.wanhua, requestId).count,
     ).toBe(1);
+  });
+
+  it('exposes reaction counts and viewer reaction state on public list and detail', async () => {
+    const requestId = insertRequest({ title: 'Reaction target' });
+    const pendingId = insertUser({
+      account: 'pending-reaction',
+      verificationStatus: 'pending',
+    });
+
+    db.prepare(
+      'INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)',
+    ).run(pendingId, requestId);
+
+    const anonymousList = await request(app).get('/api/requests');
+    const viewerList = await request(app)
+      .get('/api/requests')
+      .set(auth(pendingId));
+    const viewerDetail = await request(app)
+      .get(`/api/requests/${requestId}`)
+      .set(auth(pendingId));
+
+    expect(anonymousList.status).toBe(200);
+    expect(anonymousList.body.requests).toContainEqual(
+      expect.objectContaining({
+        id: requestId,
+        reactionCount: 1,
+        reactedByMe: false,
+      }),
+    );
+    expect(viewerList.body.requests).toContainEqual(
+      expect.objectContaining({
+        id: requestId,
+        reactionCount: 1,
+        reactedByMe: true,
+      }),
+    );
+    expect(viewerDetail.body.request).toMatchObject({
+      id: requestId,
+      reactionCount: 1,
+      reactedByMe: true,
+    });
+    expect(JSON.stringify(viewerList.body)).not.toContain('recommendationScore');
+  });
+
+  it('lets active unverified users toggle a heart reaction without duplicating rows', async () => {
+    const requestId = insertRequest();
+    const pendingId = insertUser({
+      account: 'unverified-heart',
+      verificationStatus: 'pending',
+    });
+
+    const anonymous = await request(app).post(`/api/requests/${requestId}/reaction`);
+    const first = await request(app)
+      .post(`/api/requests/${requestId}/reaction`)
+      .set(auth(pendingId));
+    const second = await request(app)
+      .post(`/api/requests/${requestId}/reaction`)
+      .set(auth(pendingId));
+    const removed = await request(app)
+      .delete(`/api/requests/${requestId}/reaction`)
+      .set(auth(pendingId));
+
+    expect(anonymous.status).toBe(401);
+    expect(first.body).toEqual({ reactionCount: 1, reactedByMe: true });
+    expect(second.body).toEqual({ reactionCount: 1, reactedByMe: true });
+    expect(removed.body).toEqual({ reactionCount: 0, reactedByMe: false });
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM request_reactions WHERE userId = ? AND requestId = ?',
+        )
+        .get(pendingId, requestId).count,
+    ).toBe(0);
+  });
+
+  it.each([
+    ['pending request', { status: 'pending', expiresAt: FUTURE }],
+    ['taken down request', { status: 'taken_down', expiresAt: FUTURE }],
+    ['expired request', { status: 'approved', expiresAt: PAST }],
+  ])('does not add a reaction to a hidden %s', async (_label, hidden) => {
+    const requestId = insertRequest(hidden);
+
+    const response = await request(app)
+      .post(`/api/requests/${requestId}/reaction`)
+      .set(auth(users.wanhua));
+
+    expect(response.status).toBe(404);
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM request_reactions WHERE requestId = ?')
+        .get(requestId).count,
+    ).toBe(0);
   });
 
   it('creates bound pending reports for public requests and validates reason', async () => {
@@ -992,6 +1436,67 @@ describe('request, contact, and admin API', () => {
       takedownReason: 'Policy violation',
     });
     expect(repeated.status).toBe(409);
+  });
+
+  it.each(['not_submitted', 'rejected'])(
+    'does not let an admin approve a pending request for a %s owner',
+    async (verificationStatus) => {
+      const ownerId = insertUser({
+        account: `unverified-owner-${verificationStatus}`,
+        verificationStatus,
+      });
+      const requestId = insertRequest({ ownerId, status: 'pending' });
+
+      const response = await request(app)
+        .post(`/api/admin/requests/${requestId}/approve`)
+        .set(auth(users.admin));
+
+      expect(response.status).toBe(409);
+      expect(db.prepare('SELECT status FROM requests WHERE id = ?').get(requestId).status)
+        .toBe('pending');
+    },
+  );
+
+  it('lets admins hard delete requests and cascades request-owned records', async () => {
+    const requestId = insertRequest({ status: 'closed', title: 'Delete me' });
+    db.prepare('INSERT INTO request_reactions (userId, requestId) VALUES (?, ?)').run(users.wanhua, requestId);
+    db.prepare('INSERT INTO favorites (userId, requestId) VALUES (?, ?)').run(users.wanhua, requestId);
+    db.prepare(
+      `INSERT INTO contact_applications (requestId, applicantId, ownerId, message)
+       VALUES (?, ?, ?, 'Interested')`,
+    ).run(requestId, users.wanhua, users.qixiu);
+    db.prepare(
+      `INSERT INTO reports (reporterId, targetType, targetId, reason)
+       VALUES (?, 'request', ?, 'Delete target report')`,
+    ).run(users.wanhua, requestId);
+    const imageFilename = 'delete-me.png';
+    mkdirSync(REQUEST_IMAGE_DIRECTORY, { recursive: true });
+    writeFileSync(path.join(REQUEST_IMAGE_DIRECTORY, imageFilename), 'image bytes');
+    db.prepare(
+      `INSERT INTO request_images (requestId, url, mimeType, sizeBytes, sortOrder)
+       VALUES (?, ?, 'image/png', 11, 0)`,
+    ).run(requestId, `/uploads/request-images/${imageFilename}`);
+
+    const nonAdmin = await request(app)
+      .delete(`/api/admin/requests/${requestId}`)
+      .set(auth(users.qixiu));
+    const deleted = await request(app)
+      .delete(`/api/admin/requests/${requestId}`)
+      .set(auth(users.admin));
+    const repeated = await request(app)
+      .delete(`/api/admin/requests/${requestId}`)
+      .set(auth(users.admin));
+
+    expect(nonAdmin.status).toBe(403);
+    expect(deleted.body).toEqual({ deleted: true });
+    expect(repeated.status).toBe(404);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM requests WHERE id = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM favorites WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM request_reactions WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM contact_applications WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM request_images WHERE requestId = ?').get(requestId).count).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM reports WHERE targetType = 'request' AND targetId = ?").get(requestId).count).toBe(0);
+    expect(existsSync(path.join(REQUEST_IMAGE_DIRECTORY, imageFilename))).toBe(false);
   });
 
   it.each([

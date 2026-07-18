@@ -1,3 +1,6 @@
+import { rmSync } from 'node:fs';
+
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDatabase, seedDatabase } from '../server/db.js';
@@ -8,6 +11,7 @@ const expectedTables = [
   'profiles',
   'reports',
   'request_images',
+  'request_reactions',
   'requests',
   'users',
   'verifications',
@@ -56,6 +60,83 @@ describe('SQLite database', () => {
       notnull: 1,
       defaultValue: "'{}'",
     });
+  });
+
+  it('supports owner request lifecycle columns and statuses', () => {
+    seedDatabase(db);
+    const columns = db.prepare('PRAGMA table_info(requests)').all();
+    expect(columns.map(({ name }) => name)).toEqual(expect.arrayContaining([
+      'withdrawnAt',
+      'closedAt',
+      'ownerHiddenAt',
+    ]));
+
+    const qixiu = db.prepare("SELECT id FROM users WHERE account = 'qixiu'").get();
+    for (const status of ['withdrawn', 'closed']) {
+      expect(() => db.prepare(`
+        INSERT INTO requests
+          (ownerId, type, title, description, expiresAt, status, details)
+        VALUES (?, 'other', ?, 'Lifecycle test', '2099-01-01T00:00:00.000Z', ?, '{}')
+      `).run(qixiu.id, `Lifecycle ${status}`, status)).not.toThrow();
+    }
+  });
+
+  it('migrates legacy requests without breaking related foreign keys', () => {
+    const filename = '.tmp-legacy-request-lifecycle.sqlite';
+    rmSync(filename, { force: true });
+    const legacy = new Database(filename);
+    legacy.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        account TEXT NOT NULL UNIQUE,
+        passwordHash TEXT NOT NULL,
+        nickname TEXT NOT NULL
+      );
+      CREATE TABLE requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ownerId INTEGER NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('other')),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        city TEXT,
+        remote INTEGER NOT NULL DEFAULT 0 CHECK (remote IN (0, 1)),
+        industry TEXT,
+        budgetOrReward TEXT,
+        expiresAt TEXT NOT NULL CHECK (datetime(expiresAt) IS NOT NULL),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN (
+          'draft', 'pending', 'approved', 'rejected', 'taken_down', 'expired'
+        )),
+        rejectReason TEXT,
+        takedownReason TEXT,
+        createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (id, ownerId),
+        FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
+      );
+      INSERT INTO users VALUES (1, 'legacy', 'password:test', 'Legacy User');
+      INSERT INTO requests (ownerId, type, title, description, expiresAt, status)
+      VALUES (1, 'other', 'Legacy request', 'Kept during migration',
+              '2099-01-01T00:00:00.000Z', 'approved');
+    `);
+    legacy.close();
+
+    const migrated = createDatabase(filename);
+    try {
+      expect(migrated.prepare('SELECT title, status, details FROM requests').get()).toEqual({
+        title: 'Legacy request',
+        status: 'approved',
+        details: '{}',
+      });
+      expect(
+        migrated
+          .prepare('PRAGMA foreign_key_list(contact_applications)')
+          .all()
+          .map(({ table }) => table),
+      ).toContain('requests');
+    } finally {
+      migrated.close();
+      rmSync(filename, { force: true });
+    }
   });
 
   it('creates request image storage for trade photos', () => {

@@ -1,27 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Eye } from 'lucide-react';
 
 import { api } from '../api/client.js';
+import ReactionButton from '../components/ReactionButton.jsx';
 import { requestTypes } from '../domain/constants.js';
-
-const priorityTypes = new Set(['job_referral', 'industry_consulting']);
-const industrySummaryTypes = new Set(['job_referral', 'industry_consulting']);
+import {
+  buildRequestCardFacts,
+  feedChannels,
+} from '../domain/feedDiscovery.js';
 
 function requestTypeLabel(value) {
   return requestTypes.find((type) => type.value === value)?.label ?? '其他';
 }
 
-function sortedRequests(requests) {
-  return [...requests].sort((left, right) => {
-    const priorityDifference = Number(!priorityTypes.has(left.type)) - Number(!priorityTypes.has(right.type));
-    if (priorityDifference) return priorityDifference;
-    return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
-  });
-}
-
-export default function FeedPage({ onSelectRequest }) {
+export default function FeedPage({ onSelectRequest, refreshKey = 0 }) {
   const [filters, setFilters] = useState({ type: '', city: '', industry: '', remote: '' });
   const [state, setState] = useState({ loading: true, error: '', requests: [] });
+  const [channel, setChannel] = useState('recommended');
+  const [mutationError, setMutationError] = useState('');
+  const [pendingReactionId, setPendingReactionId] = useState(null);
+  const sort = channel === 'latest' ? 'latest' : 'recommended';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -29,9 +27,11 @@ export default function FeedPage({ onSelectRequest }) {
     for (const [key, value] of Object.entries(filters)) {
       if (value) params.set(key, value);
     }
+    params.set('channel', channel);
+    params.set('sort', sort);
     const query = params.toString();
     setState((current) => ({ ...current, loading: true, error: '' }));
-    api(`/api/requests${query ? `?${query}` : ''}`, { signal: controller.signal })
+    api(`/api/requests?${query}`, { signal: controller.signal })
       .then((result) => setState({ loading: false, error: '', requests: result.requests ?? [] }))
       .catch((error) => {
         if (error.name !== 'AbortError') {
@@ -39,19 +39,76 @@ export default function FeedPage({ onSelectRequest }) {
         }
       });
     return () => controller.abort();
-  }, [filters]);
-
-  const requests = useMemo(() => sortedRequests(state.requests), [state.requests]);
+  }, [channel, filters, refreshKey, sort]);
 
   function updateFilter(event) {
     const { name, value } = event.target;
     setFilters((current) => ({ ...current, [name]: value }));
   }
 
+  async function toggleReaction(requestId) {
+    const target = state.requests.find((request) => request.id === requestId);
+    if (!target || pendingReactionId) return;
+    const nextReacted = !target.reactedByMe;
+    const nextCount = Math.max(
+      0,
+      Number(target.reactionCount ?? 0) + (nextReacted ? 1 : -1),
+    );
+    setMutationError('');
+    setPendingReactionId(requestId);
+    setState((current) => ({
+      ...current,
+      requests: current.requests.map((request) =>
+        request.id === requestId
+          ? { ...request, reactedByMe: nextReacted, reactionCount: nextCount }
+          : request,
+      ),
+    }));
+    try {
+      const result = await api(`/api/requests/${requestId}/reaction`, {
+        method: nextReacted ? 'POST' : 'DELETE',
+      });
+      setState((current) => ({
+        ...current,
+        requests: current.requests.map((request) =>
+          request.id === requestId
+            ? {
+                ...request,
+                reactedByMe: result.reactedByMe,
+                reactionCount: result.reactionCount,
+              }
+            : request,
+        ),
+      }));
+    } catch (error) {
+      setMutationError(error.message || '心形状态未能更新');
+      setState((current) => ({
+        ...current,
+        requests: current.requests.map((request) =>
+          request.id === requestId ? target : request,
+        ),
+      }));
+    } finally {
+      setPendingReactionId(null);
+    }
+  }
+
   return (
     <section className="page feed-page" aria-labelledby="feed-title">
       <h2 id="feed-title">万事广场</h2>
       <p className="page-intro">看清来路与需求，再决定要不要开口接话。</p>
+      <div className="feed-channel-bar" role="group" aria-label="万事广场频道">
+        {feedChannels.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            className={item.value === channel ? 'button-primary' : 'button-secondary'}
+            onClick={() => setChannel(item.value)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
       <div className="filter-bar" aria-label="委托筛选">
         <label>
           类型
@@ -78,12 +135,13 @@ export default function FeedPage({ onSelectRequest }) {
         </label>
       </div>
 
+      {mutationError && <p role="alert">{mutationError}</p>}
       {state.loading && <p role="status">正在打听广场消息…</p>}
       {!state.loading && state.error && <p role="alert">{state.error}</p>}
-      {!state.loading && !state.error && requests.length === 0 && <p>暂时没有符合条件的委托。</p>}
-      {!state.loading && !state.error && requests.length > 0 && (
+      {!state.loading && !state.error && state.requests.length === 0 && <p>暂时没有符合条件的委托。</p>}
+      {!state.loading && !state.error && state.requests.length > 0 && (
         <div className="request-list">
-          {requests.map((request) => (
+          {state.requests.map((request) => (
             <article className="request-card" key={request.id}>
               {request.images?.[0] && (
                 <img
@@ -92,24 +150,37 @@ export default function FeedPage({ onSelectRequest }) {
                   alt={`${request.title} 封面图`}
                 />
               )}
-              <p>{requestTypeLabel(request.type)}</p>
+              <p className="request-type-pill">{requestTypeLabel(request.type)}</p>
               <h3>{request.title}</h3>
-              {request.description && <p>{request.description}</p>}
-              <p>{request.remote ? '可远程' : request.city || '城市未注明'}{request.remote && request.city ? ` · ${request.city}` : ''}</p>
-              {request.industry && industrySummaryTypes.has(request.type) && <p>行业：{request.industry}</p>}
-              <p>有效期至：{new Date(request.expiresAt).toLocaleString('zh-CN')}</p>
-              <p>
-                发布者：{request.owner?.nickname || '未署名'}
+              <dl className="request-card-facts">
+                {buildRequestCardFacts(request).map((fact) => (
+                  <div key={fact.label}>
+                    <dt>{fact.label}</dt>
+                    <dd>{fact.value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="request-card-owner">
+                {request.owner?.nickname || '未署名侠士'}
                 {request.owner?.server ? ` · ${request.owner.server}` : ''}
-                {request.owner?.sect ? ` · ${request.owner.sect}` : ''}
-                {request.owner?.startedYear ? ` · ${request.owner.startedYear}年入坑` : ''}
-                {request.owner?.city ? ` · ${request.owner.city}` : ''}
-                {request.owner?.industry ? ` · ${request.owner.industry}` : ''}
-                {request.owner?.verificationStatus === 'approved' ? ' · 已确认身份' : ''}
+                {request.owner?.verificationStatus === 'approved' ? ' · 已认证' : ''}
               </p>
-              <button type="button" onClick={() => onSelectRequest?.(request.id)} className="button-secondary">
-                <Eye aria-hidden="true" size={18} />查看委托：{request.title}
-              </button>
+              <div className="request-card-actions">
+                <ReactionButton
+                  count={request.reactionCount}
+                  disabled={pendingReactionId === request.id}
+                  reacted={request.reactedByMe}
+                  requestTitle={request.title}
+                  onToggle={() => toggleReaction(request.id)}
+                />
+                <button
+                  type="button"
+                  onClick={() => onSelectRequest?.(request.id)}
+                  className="button-secondary"
+                >
+                  <Eye aria-hidden="true" size={18} />查看委托
+                </button>
+              </div>
             </article>
           ))}
         </div>

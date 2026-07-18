@@ -74,10 +74,15 @@ CREATE TABLE IF NOT EXISTS requests (
       'approved',
       'rejected',
       'taken_down',
-      'expired'
+      'expired',
+      'withdrawn',
+      'closed'
     )),
   rejectReason TEXT,
   takedownReason TEXT,
+  withdrawnAt TEXT,
+  closedAt TEXT,
+  ownerHiddenAt TEXT,
   createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (id, ownerId),
@@ -115,6 +120,16 @@ CREATE TABLE IF NOT EXISTS contact_applications (
 );
 
 CREATE TABLE IF NOT EXISTS favorites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  userId INTEGER NOT NULL,
+  requestId INTEGER NOT NULL,
+  createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (userId, requestId),
+  FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (requestId) REFERENCES requests(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS request_reactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   userId INTEGER NOT NULL,
   requestId INTEGER NOT NULL,

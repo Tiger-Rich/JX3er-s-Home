@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ContactRound,
+  ClipboardList,
   House,
   LogOut,
   Send,
@@ -10,6 +11,7 @@ import {
 const navigation = [
   { id: 'feed', label: '万事广场', Icon: House },
   { id: 'create', label: '发个委托', Icon: Send },
+  { id: 'myRequests', label: '我的委托', Icon: ClipboardList },
   { id: 'contacts', label: '联系申请', Icon: ContactRound },
   { id: 'profile', label: '我的名片', Icon: UserRound },
 ];
