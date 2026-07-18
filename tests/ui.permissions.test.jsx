@@ -2328,6 +2328,45 @@ describe('admin review pages', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('举报处理已更新。');
   });
 
+  it('batch approves selected pending requests and clears selection after refresh', async () => {
+    const secondPending = { ...reviewedRequest, id: 42, title: '第二条待审委托' };
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        requests: [reviewedRequest, secondPending, { ...reviewedRequest, id: 43, status: 'approved' }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ approvedCount: 2, rejectedCount: 0, skipped: [], failed: [] }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }));
+    const user = userEvent.setup();
+    render(<AdminRequests />);
+
+    await user.click(await screen.findByRole('checkbox', { name: '选择委托 41' }));
+    await user.click(screen.getByRole('checkbox', { name: '选择委托 42' }));
+    expect(screen.queryByRole('checkbox', { name: '选择委托 43' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '批量通过 2 条' }));
+    expect(screen.getByRole('dialog', { name: '确认批量审核' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '确认批量通过' }));
+
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/requests/batch-review', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ requestIds: [41, 42], decision: 'approve' }),
+    }));
+    expect(await screen.findByRole('status')).toHaveTextContent('批量审核完成：通过 2 条，拒绝 0 条，跳过 0 条。');
+    expect(screen.queryByRole('checkbox', { name: '选择委托 41' })).not.toBeInTheDocument();
+  });
+
+  it('requires a shared reason before confirming a batch rejection', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ requests: [reviewedRequest] }));
+    const user = userEvent.setup();
+    render(<AdminRequests />);
+
+    await user.click(await screen.findByRole('checkbox', { name: '选择委托 41' }));
+    await user.click(screen.getByRole('button', { name: '批量拒绝 1 条' }));
+    expect(screen.getByRole('button', { name: '确认批量拒绝' })).toBeDisabled();
+    await user.type(screen.getByLabelText('批量拒绝理由'), '不符合发布范围');
+    expect(screen.getByRole('button', { name: '确认批量拒绝' })).toBeEnabled();
+  });
+
   it('shows withdrawn and closed request statuses in the admin filter and list', async () => {
     fetch.mockResolvedValueOnce(jsonResponse({
       requests: [{ ...reviewedRequest, status: 'closed' }],

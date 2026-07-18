@@ -26,6 +26,9 @@ export default function AdminRequests({ onSummaryChange }) {
   const [feedback, setFeedback] = useState('');
   const [reasons, setReasons] = useState({});
   const [deleteConfirmations, setDeleteConfirmations] = useState({});
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [batchDecision, setBatchDecision] = useState(null);
+  const [batchReason, setBatchReason] = useState('');
   const [mutating, setMutating] = useState(false);
   const mountedRef = useRef(false);
   const activeFiltersRef = useRef(emptyFilters);
@@ -56,6 +59,7 @@ export default function AdminRequests({ onSummaryChange }) {
       if (!mountedRef.current || owner.version !== requestId) return false;
       const requests = result.requests ?? [];
       setItems(requests);
+      setSelectedIds(new Set());
       if (!Object.values(nextFilters).some(Boolean)) {
         onSummaryChange?.(requests.filter((item) => item.status === 'pending').length);
       }
@@ -92,6 +96,8 @@ export default function AdminRequests({ onSummaryChange }) {
   function submitFilters(event) {
     event.preventDefault();
     activeFiltersRef.current = filters;
+    setSelectedIds(new Set());
+    setBatchDecision(null);
     setFeedback('');
     load(filters);
   }
@@ -166,6 +172,77 @@ export default function AdminRequests({ onSummaryChange }) {
     }
   }
 
+  const selectableItems = items.filter((item) => item.status === 'pending');
+  const selectedPendingIds = selectableItems
+    .map((item) => item.id)
+    .filter((id) => selectedIds.has(id));
+  const allSelectableSelected = selectableItems.length > 0 && selectedPendingIds.length === selectableItems.length;
+
+  function toggleSelected(id) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllSelectable() {
+    setSelectedIds(allSelectableSelected ? new Set() : new Set(selectableItems.map((item) => item.id)));
+  }
+
+  function openBatchDecision(decision) {
+    if (!selectedPendingIds.length) return;
+    setError('');
+    setFeedback('');
+    setBatchDecision(decision);
+  }
+
+  async function confirmBatchDecision() {
+    if (!batchDecision || mutationOwnerRef.current.controller) return;
+    const requestIds = selectedPendingIds;
+    const reason = batchReason.trim();
+    if (!requestIds.length || (batchDecision === 'reject' && !reason)) return;
+    const owner = mutationOwnerRef.current;
+    const controller = new AbortController();
+    const requestId = owner.version + 1;
+    owner.version = requestId;
+    owner.controller = controller;
+    setMutating(true);
+    setError('');
+    setFeedback('');
+    try {
+      const result = await api('/api/admin/requests/batch-review', {
+        method: 'POST',
+        signal: controller.signal,
+        body: {
+          requestIds,
+          decision: batchDecision,
+          ...(batchDecision === 'reject' ? { reason } : {}),
+        },
+      });
+      if (!mountedRef.current || owner.version !== requestId) return;
+      const refreshed = await load(activeFiltersRef.current);
+      if (!mountedRef.current || owner.version !== requestId || !refreshed) return;
+      await refreshPendingSummary();
+      if (!mountedRef.current || owner.version !== requestId) return;
+      const skippedCount = result.skipped?.length ?? 0;
+      const failedCount = result.failed?.length ?? 0;
+      setBatchDecision(null);
+      setBatchReason('');
+      setFeedback(`批量审核完成：通过 ${result.approvedCount ?? 0} 条，拒绝 ${result.rejectedCount ?? 0} 条，跳过 ${skippedCount} 条。`);
+      if (failedCount) setError(`有 ${failedCount} 条委托未能完成审核，请刷新后重试。`);
+    } catch (mutationError) {
+      if (!mountedRef.current || owner.version !== requestId || mutationError.name === 'AbortError') return;
+      setError(mutationError.message || '暂时无法完成批量审核。');
+    } finally {
+      if (owner.version === requestId) {
+        owner.controller = null;
+        if (mountedRef.current) setMutating(false);
+      }
+    }
+  }
+
   function reasonControl(item, action, label) {
     const key = `${item.id}:${action}`;
     const reason = reasons[key] ?? '';
@@ -195,11 +272,20 @@ export default function AdminRequests({ onSummaryChange }) {
       {loading && <p role="status">正在加载委托…</p>}
       {error && <p role="alert">{error}</p>}
       {feedback && <p role="status">{feedback}</p>}
+      {selectedPendingIds.length > 0 && (
+        <section className="admin-batch-toolbar" aria-label="批量委托审核">
+          <p>已选择 {selectedPendingIds.length} 条待审委托</p>
+          <div>
+            <button type="button" className="button-primary" disabled={mutating} onClick={() => openBatchDecision('approve')}><Check aria-hidden="true" size={18} />批量通过 {selectedPendingIds.length} 条</button>
+            <button type="button" className="button-danger" disabled={mutating} onClick={() => openBatchDecision('reject')}><X aria-hidden="true" size={18} />批量拒绝 {selectedPendingIds.length} 条</button>
+          </div>
+        </section>
+      )}
       {!loading && !error && (
         <div className="table-scroll">
           <table className="admin-table admin-table-requests">
           <caption className="sr-only">委托审核列表</caption>
-          <thead><tr><th>委托</th><th>范围与回报</th><th>发布者公开身份</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th className="admin-selection-cell"><input type="checkbox" aria-label="全选当前筛选结果" checked={allSelectableSelected} disabled={!selectableItems.length || mutating} onChange={toggleAllSelectable} /></th><th>委托</th><th>范围与回报</th><th>发布者公开身份</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             {items.map((item) => {
               const owner = item.owner ?? {};
@@ -207,6 +293,7 @@ export default function AdminRequests({ onSummaryChange }) {
               const detailRows = visibleDetailRows(item.type, item.details);
               return (
                 <tr key={item.id}>
+                  <td className="admin-selection-cell">{item.status === 'pending' && <input type="checkbox" aria-label={`选择委托 ${item.id}`} checked={selectedIds.has(item.id)} disabled={mutating} onChange={() => toggleSelected(item.id)} />}</td>
                   <td>
                     {item.title}<br />类型：{typeLabel}<br />{item.description}
                     {detailRows.length > 0 && (
@@ -241,9 +328,24 @@ export default function AdminRequests({ onSummaryChange }) {
                 </tr>
               );
             })}
-            {!items.length && <tr><td colSpan="5">没有符合条件的委托</td></tr>}
+            {!items.length && <tr><td colSpan="6">没有符合条件的委托</td></tr>}
           </tbody>
           </table>
+        </div>
+      )}
+      {batchDecision && (
+        <div className="admin-confirmation" role="dialog" aria-modal="true" aria-label="确认批量审核">
+          <div>
+            <h3>{batchDecision === 'approve' ? '确认批量通过委托？' : '确认批量拒绝委托？'}</h3>
+            <p>本次将处理 {selectedPendingIds.length} 条当前待审委托。</p>
+            {batchDecision === 'reject' && <label>批量拒绝理由<textarea aria-label="批量拒绝理由" value={batchReason} onChange={(event) => setBatchReason(event.target.value)} /></label>}
+          </div>
+          <div className="admin-confirmation-actions">
+            <button type="button" className="button-secondary" disabled={mutating} onClick={() => setBatchDecision(null)}>取消</button>
+            <button type="button" className={batchDecision === 'approve' ? 'button-primary' : 'button-danger'} disabled={mutating || (batchDecision === 'reject' && !batchReason.trim())} onClick={confirmBatchDecision}>
+              {batchDecision === 'approve' ? '确认批量通过' : '确认批量拒绝'}
+            </button>
+          </div>
         </div>
       )}
     </section>
