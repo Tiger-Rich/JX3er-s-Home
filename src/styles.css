@@ -673,6 +673,23 @@ textarea[readonly] {
   font-weight: 800;
 }
 
+.field-group {
+  display: grid;
+  gap: 10px;
+}
+
+.field-group-label,
+.field-hint {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.field-group-label {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;

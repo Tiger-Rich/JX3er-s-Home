@@ -56,7 +56,7 @@ export function createApp(db) {
         error.code === 'LIMIT_UNEXPECTED_FILE'
       ) {
         return res.status(400).json({
-          error: 'A trade request can include at most 6 images',
+          error: 'A request can include at most 6 images',
         });
       }
     }

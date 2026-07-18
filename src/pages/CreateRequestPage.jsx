@@ -20,8 +20,9 @@ const initialForm = {
 };
 
 const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const maxTradeImages = 6;
+const maxRequestImages = 6;
 const maxImageBytes = 5 * 1024 * 1024;
+const imageUploadHint = '支持 JPG/PNG/WebP，单张不超过 5MB，最多 6 张。';
 
 function RequiredMark() {
   return <span className="required-mark" aria-hidden="true">*</span>;
@@ -59,6 +60,7 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
   const approved = session?.verificationStatus === 'approved';
   const editing = Boolean(editRequestId);
   const hasExistingImages = editing && images.some((image) => image.existing);
+  const imageFieldLabel = form.type === 'trade' ? '买卖交易图片' : '委托封面';
 
   useEffect(() => {
     imagesRef.current = images;
@@ -169,8 +171,8 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
     if (editing) return;
     const selected = [...event.target.files];
     event.target.value = '';
-    if (images.length + selected.length > maxTradeImages) {
-      setFeedback({ type: 'error', message: '买卖交易最多上传 6 张图片。' });
+    if (images.length + selected.length > maxRequestImages) {
+      setFeedback({ type: 'error', message: '图片最多上传 6 张。' });
       return;
     }
     const invalid = selected.find((file) => (
@@ -241,9 +243,7 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
       payload.append('details', JSON.stringify(cleanDetails));
       payload.append('industry', '');
       payload.append('budgetOrReward', '');
-      if (form.type === 'trade') {
-        for (const image of images) payload.append('images', image.file);
-      }
+      for (const image of images) payload.append('images', image.file);
     }
 
     const controller = new AbortController();
@@ -306,26 +306,28 @@ export default function CreateRequestPage({ session, editRequestId, onEditComple
           })}
           <label>{labelText('补充说明（选填）')}<textarea aria-label="补充说明（选填）" name="extraNote" value={details.extraNote ?? ''} onChange={updateDetail} maxLength={800} /></label>
         </div>
-        {form.type === 'trade' && (
-          <div className="image-upload-field">
-            {!editing && <label>
-              买卖交易图片
-              <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={updateImages} />
-            </label>}
-            {images.length > 0 && (
-              <div className="image-preview-grid">
-                {images.map((image, index) => (
-                  <figure key={`${image.name}-${index}`}>
-                    <img src={image.previewUrl} alt={image.name} />
-                    {!editing && <button type="button" className="button-secondary" onClick={() => removeImage(index)} aria-label={`移除图片：${image.name}`}>移除</button>}
-                  </figure>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <label>城市<input name="city" value={form.city} onChange={update} maxLength={80} /></label>
-        <label className="checkbox-field"><input name="remote" type="checkbox" checked={form.remote} onChange={update} />可远程</label>
+        <div className="image-upload-field">
+          {!editing && <label>
+            {imageFieldLabel}
+            <input aria-label={imageFieldLabel} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={updateImages} />
+          </label>}
+          <p className="field-hint">{imageUploadHint}</p>
+          {images.length > 0 && (
+            <div className="image-preview-grid">
+              {images.map((image, index) => (
+                <figure key={`${image.name}-${index}`}>
+                  <img src={image.previewUrl} alt={image.name} />
+                  {!editing && <button type="button" className="button-secondary" onClick={() => removeImage(index)} aria-label={`移除图片：${image.name}`}>移除</button>}
+                </figure>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="field-group">
+          <p className="field-group-label">{labelText('城市/远程方式', true)}</p>
+          <label>城市<input name="city" value={form.city} onChange={update} maxLength={80} /></label>
+          <label className="checkbox-field"><input name="remote" type="checkbox" checked={form.remote} onChange={update} />可远程</label>
+        </div>
         <label>{labelText('有效期', true)}<input aria-label="有效期" name="expiresAt" type="datetime-local" value={form.expiresAt} onChange={update} required /></label>
         <button type="submit" disabled={!approved || submitting || editLoading} className="button-primary">
           <Send aria-hidden="true" size={18} />{editing ? '重新提交审核' : '发布委托'}

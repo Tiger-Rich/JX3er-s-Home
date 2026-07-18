@@ -38,6 +38,13 @@ export default function App() {
     owner.controller = null;
   }, []);
 
+  function resetUserWorkspace() {
+    setActiveTab('feed');
+    setVisitedTabs(new Set(['feed']));
+    setSelectedRequest(null);
+    setEditingRequestId(null);
+  }
+
   const refreshSession = useCallback(async () => {
     const owner = refreshOwnerRef.current;
     owner.controller?.abort();
@@ -79,6 +86,7 @@ export default function App() {
       cancelRefresh();
       setSession(null);
       setAuthError('');
+      resetUserWorkspace();
     });
     refreshSession();
     return () => {
@@ -107,6 +115,7 @@ export default function App() {
       });
       if (!mountedRef.current || owner.version !== requestId) return;
       setToken(result.token);
+      resetUserWorkspace();
       await refreshSession();
     } catch (error) {
       if (
@@ -126,6 +135,7 @@ export default function App() {
     setToken(null);
     setSession(null);
     setAuthError('');
+    resetUserWorkspace();
   }
 
   function handleTabChange(tab) {

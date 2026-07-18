@@ -272,9 +272,6 @@ export function createRequestsRouter(db) {
         const files = req.files ?? [];
         const body = req.body ?? {};
         const values = buildRequestValuesFromBody(req.user.id, body, { multipart });
-        if (files.length > 0 && values.type !== 'trade') {
-          throw clientError(400, 'Images are only allowed for trade requests');
-        }
         const createRequest = db.transaction(() => {
           const result = db
             .prepare(

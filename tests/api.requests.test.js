@@ -366,7 +366,7 @@ describe('request, contact, and admin API', () => {
     },
   );
 
-  it('rejects changing a withdrawn trade request with images to a non-trade type', async () => {
+  it('allows resubmitting a withdrawn request with images as any request type', async () => {
     const withdrawnId = insertRequest({ status: 'withdrawn', type: 'trade' });
     db.prepare(
       `INSERT INTO request_images (requestId, url, mimeType, sizeBytes, sortOrder)
@@ -378,7 +378,7 @@ describe('request, contact, and admin API', () => {
       .set(auth(users.qixiu))
       .send({
         type: 'other',
-        title: 'Should remain withdrawn',
+        title: 'Resubmitted with cover',
         city: 'Hangzhou',
         remote: false,
         industry: 'Technology',
@@ -387,12 +387,13 @@ describe('request, contact, and admin API', () => {
         details: validDetails('other'),
       });
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toMatch(/trade|images/i);
-    expect(db.prepare('SELECT status, type FROM requests WHERE id = ?').get(withdrawnId)).toEqual({
-      status: 'withdrawn',
-      type: 'trade',
+    expect(response.status).toBe(200);
+    expect(response.body.request).toMatchObject({
+      status: 'pending',
+      type: 'other',
+      title: 'Resubmitted with cover',
     });
+    expect(response.body.request.images).toHaveLength(1);
     expect(
       db.prepare('SELECT COUNT(*) AS count FROM request_images WHERE requestId = ?').get(withdrawnId).count,
     ).toBe(1);
@@ -495,7 +496,7 @@ describe('request, contact, and admin API', () => {
     );
   });
 
-  it('rejects images on non-trade multipart publications', async () => {
+  it('publishes non-trade cover images and returns them in public DTOs', async () => {
     const response = await multipartPublish(
       users.qixiu,
       {
@@ -514,8 +515,24 @@ describe('request, contact, and admin API', () => {
       ],
     );
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain('trade');
+    expect(response.status).toBe(201);
+    expect(response.body.request).toMatchObject({
+      type: 'commission',
+      images: [
+        expect.objectContaining({
+          url: expect.stringMatching(/^\/uploads\/request-images\/.+\.png$/),
+          mimeType: 'image/png',
+          sortOrder: 0,
+        }),
+      ],
+    });
+
+    await request(app)
+      .post(`/api/admin/requests/${response.body.request.id}/approve`)
+      .set(auth(users.admin));
+    const detail = await request(app).get(`/api/requests/${response.body.request.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.request.images).toEqual(response.body.request.images);
   });
 
   it('rejects unsupported trade image types', async () => {
@@ -541,15 +558,15 @@ describe('request, contact, and admin API', () => {
     expect(response.body.error).toContain('image');
   });
 
-  it('rejects more than six trade images', async () => {
+  it('rejects more than six request images', async () => {
     const response = await multipartPublish(
       users.qixiu,
       {
-        type: 'trade',
+        type: 'commission',
         title: 'Keyboard',
         remote: 'true',
         expiresAt: FUTURE,
-        details: validDetails('trade'),
+        details: validDetails('commission'),
       },
       Array.from({ length: 7 }, (_, index) => ({
         filename: `keyboard-${index}.png`,

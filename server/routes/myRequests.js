@@ -199,10 +199,6 @@ export function createMyRequestsRouter(db) {
         return res.status(404).json({ error: 'Request not found' });
       }
       const values = buildRequestValuesFromBody(req.user.id, req.body ?? {});
-      const oldImages = loadImagesForRequests(db, [id]).get(id) ?? [];
-      if (ownedRequest.status === 'withdrawn' && oldImages.length > 0 && values.type !== 'trade') {
-        throw clientError(400, 'Requests with images can only be resubmitted as trade requests');
-      }
       const result = db.prepare(`
         UPDATE requests
         SET type = @type, title = @title, description = @description, details = @details,

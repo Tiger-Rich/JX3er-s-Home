@@ -1162,6 +1162,8 @@ describe('user workflow pages', () => {
     expect(screen.getByText('类型').querySelector('.required-mark')).toHaveTextContent('*');
     expect(screen.getByText('标题').querySelector('.required-mark')).toHaveTextContent('*');
     expect(screen.getByText('目标岗位').querySelector('.required-mark')).toHaveTextContent('*');
+    expect(screen.getByText('城市/远程方式').querySelector('.required-mark')).toHaveTextContent('*');
+    expect(screen.getByText('有效期').querySelector('.required-mark')).toHaveTextContent('*');
     expect(screen.getByText('补充说明（选填）').querySelector('.required-mark')).toBeNull();
     expect(screen.queryByLabelText('行业')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('预算/回报')).not.toBeInTheDocument();
@@ -1404,6 +1406,7 @@ describe('user workflow pages', () => {
     render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
 
     await user.selectOptions(screen.getByLabelText('类型'), 'trade');
+    expect(screen.getByText('支持 JPG/PNG/WebP，单张不超过 5MB，最多 6 张。')).toBeVisible();
     const image = new File(['fake image'], 'sweet-potato.png', { type: 'image/png' });
     await user.upload(screen.getByLabelText('买卖交易图片'), image);
 
@@ -1411,6 +1414,42 @@ describe('user workflow pages', () => {
     expect(createObjectURL).toHaveBeenCalledWith(image);
     await user.click(screen.getByRole('button', { name: '移除图片：sweet-potato.png' }));
     expect(screen.queryByAltText('sweet-potato.png')).not.toBeInTheDocument();
+  });
+
+  it('uploads optional cover images for non-trade requests and submits the first as feed cover', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ request: { id: 45, status: 'pending' } }, { status: 201 }));
+    const createObjectURL = vi.fn((file) => `blob:${file.name}`);
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    const user = userEvent.setup();
+    render(<CreateRequestPage session={{ verificationStatus: 'approved' }} />);
+
+    expect(screen.getByLabelText('委托封面')).toBeVisible();
+    expect(screen.queryByLabelText('买卖交易图片')).not.toBeInTheDocument();
+    expect(screen.getByText('支持 JPG/PNG/WebP，单张不超过 5MB，最多 6 张。')).toBeVisible();
+
+    const firstCover = new File(['first cover'], 'cover-a.png', { type: 'image/png' });
+    const secondCover = new File(['second cover'], 'cover-b.webp', { type: 'image/webp' });
+    await user.upload(screen.getByLabelText('委托封面'), [firstCover, secondCover]);
+    expect(screen.getByAltText('cover-a.png')).toBeVisible();
+    expect(screen.getByAltText('cover-b.webp')).toBeVisible();
+
+    await user.type(screen.getByLabelText('标题'), '有封面的内推委托');
+    fillDefaultJobReferralDetails();
+    await user.click(screen.getByLabelText('可远程'));
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2030-02-03T12:00' } });
+    await user.click(screen.getByRole('button', { name: '发布委托' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/requests',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.any(FormData),
+      }),
+    ));
+    const body = fetch.mock.calls[0][1].body;
+    expect(body.get('type')).toBe('job_referral');
+    expect(body.getAll('images')).toEqual([firstCover, secondCover]);
   });
 
   it('does not infer create feedback semantics from message text', async () => {
@@ -2642,6 +2681,44 @@ describe('App session flow', () => {
     await user.click(screen.getByRole('button', { name: '退出登录' }));
     expect(getToken()).toBeNull();
     expect(screen.getByRole('heading', { name: '登录番薯万事屋' })).toBeVisible();
+  });
+
+  it('returns to the feed home when logging in as another account after logout', async () => {
+    fetch.mockImplementation((path, options = {}) => {
+      if (path === '/api/auth/me') {
+        if (!getToken()) return Promise.resolve(jsonResponse({ error: 'Unauthorized' }, { status: 401 }));
+        return Promise.resolve(jsonResponse({ user: { id: getToken() === 'second-token' ? 3 : 2, role: 'user' } }));
+      }
+      if (path === '/api/auth/login') {
+        const body = JSON.parse(options.body);
+        return Promise.resolve(jsonResponse({
+          token: body.account === 'qixiu' ? 'second-token' : 'first-token',
+        }));
+      }
+      if (String(path).startsWith('/api/requests')) {
+        return Promise.resolve(jsonResponse({ requests: [] }));
+      }
+      if (String(path).startsWith('/api/my/requests')) {
+        return Promise.resolve(jsonResponse({ requests: [] }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('账号'), 'wanhua');
+    await user.type(screen.getByLabelText('密码'), 'secret123');
+    await user.click(screen.getByText('登录', { selector: 'button[type="submit"]' }));
+    await user.click(await screen.findByRole('button', { name: '我的委托' }));
+    expect(await screen.findByRole('heading', { name: '我的委托' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '退出登录' }));
+    await user.type(await screen.findByLabelText('账号'), 'qixiu');
+    await user.type(screen.getByLabelText('密码'), 'test123');
+    await user.click(screen.getByText('登录', { selector: 'button[type="submit"]' }));
+
+    expect(await screen.findByRole('heading', { name: '万事广场' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '我的委托' })).not.toBeInTheDocument();
   });
 
   it('uses the memory token for the session refresh when storage is unavailable', async () => {

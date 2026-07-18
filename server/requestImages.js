@@ -10,8 +10,8 @@ export const REQUEST_IMAGE_DIRECTORY = path.resolve(
   'uploads',
   'request-images',
 );
-export const MAX_TRADE_IMAGES = 6;
-export const MAX_TRADE_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_REQUEST_IMAGES = 6;
+export const MAX_REQUEST_IMAGE_BYTES = 5 * 1024 * 1024;
 export const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -62,8 +62,8 @@ const storage = multer.diskStorage({
 export const requestImageUpload = multer({
   storage,
   limits: {
-    fileSize: MAX_TRADE_IMAGE_BYTES,
-    files: MAX_TRADE_IMAGES,
+    fileSize: MAX_REQUEST_IMAGE_BYTES,
+    files: MAX_REQUEST_IMAGES,
   },
   fileFilter(_req, file, callback) {
     if (!ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
@@ -73,7 +73,7 @@ export const requestImageUpload = multer({
     }
     return callback(null, true);
   },
-}).array('images', MAX_TRADE_IMAGES);
+}).array('images', MAX_REQUEST_IMAGES);
 
 export function requestImageDto(row) {
   return {
