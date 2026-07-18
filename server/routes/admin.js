@@ -35,6 +35,42 @@ function requiredText(value, field, maxLength = 500) {
   return normalized;
 }
 
+function parseBatchReview(body) {
+  if (
+    !Array.isArray(body?.requestIds)
+    || body.requestIds.length === 0
+    || body.requestIds.length > 50
+  ) {
+    throw clientError(400, 'requestIds must contain 1 to 50 ids');
+  }
+  const requestIds = [...new Set(body.requestIds)];
+  if (requestIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+    throw clientError(400, 'requestIds must contain positive integer ids');
+  }
+  if (!['approve', 'reject'].includes(body.decision)) {
+    throw clientError(400, 'decision must be approve or reject');
+  }
+  return {
+    requestIds,
+    decision: body.decision,
+    reason: body.decision === 'reject' ? requiredText(body.reason, 'reason') : null,
+  };
+}
+
+function pendingApprovalCondition() {
+  return `AND datetime(expiresAt) > datetime('now')
+          AND EXISTS (
+            SELECT 1 FROM users owner
+            WHERE owner.id = requests.ownerId
+              AND owner.status = 'active'
+          )
+          AND EXISTS (
+            SELECT 1 FROM verifications ownerVerification
+            WHERE ownerVerification.userId = requests.ownerId
+              AND ownerVerification.status = 'approved'
+          )`;
+}
+
 function publicOwner(row) {
   return {
     nickname: row.ownerNickname,
@@ -145,6 +181,74 @@ const VERIFICATION_QUERY = `
   LEFT JOIN profiles p ON p.userId = u.id
 `;
 
+const REPORT_STATUSES = ['pending', 'resolved', 'dismissed'];
+
+const ADMIN_REPORT_QUERY = `
+  SELECT report.id AS reportId, report.reporterId, report.targetType, report.targetId,
+         report.reason, report.status, report.handlerId, report.handledAt,
+         report.resultNote, report.createdAt,
+         reporter.id AS reporterUserId, reporter.nickname AS reporterNickname,
+         handler.id AS handlerUserId, handler.nickname AS handlerNickname,
+         r.id, r.ownerId, r.type, r.title, r.description, r.details,
+         r.city, r.remote, r.industry, r.budgetOrReward, r.expiresAt, r.status AS requestStatus,
+         r.rejectReason, r.takedownReason, r.createdAt AS requestCreatedAt,
+         r.updatedAt AS requestUpdatedAt, u.nickname AS ownerNickname, u.city AS ownerCity,
+         p.server AS ownerServer, p.gameNickname AS ownerGameNickname,
+         p.sect AS ownerSect, p.startedYear AS ownerStartedYear,
+         p.industry AS ownerIndustry, p.occupation AS ownerOccupation,
+         COALESCE(v.status, 'not_submitted') AS ownerVerificationStatus
+  FROM reports report
+  JOIN requests r ON r.id = report.targetId
+  JOIN users reporter ON reporter.id = report.reporterId
+  LEFT JOIN users handler ON handler.id = report.handlerId
+  JOIN users u ON u.id = r.ownerId
+  LEFT JOIN profiles p ON p.userId = u.id
+  LEFT JOIN verifications v ON v.userId = u.id
+  WHERE report.targetType = 'request'
+`;
+
+function reportDto(row) {
+  return {
+    id: row.reportId,
+    reporterId: row.reporterId,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    reason: row.reason,
+    status: row.status,
+    handlerId: row.handlerId,
+    handledAt: row.handledAt,
+    resultNote: row.resultNote,
+    createdAt: row.createdAt,
+    reporter: {
+      id: row.reporterUserId,
+      nickname: row.reporterNickname,
+    },
+    handler: row.handlerUserId === null
+      ? null
+      : {
+        id: row.handlerUserId,
+        nickname: row.handlerNickname,
+      },
+    request: reviewedRequestDto({
+      ...row,
+      status: row.requestStatus,
+      createdAt: row.requestCreatedAt,
+      updatedAt: row.requestUpdatedAt,
+    }),
+  };
+}
+
+function loadRequestReportWithImages(db, reportId) {
+  const row = db
+    .prepare(`${ADMIN_REPORT_QUERY} AND report.id = ?`)
+    .get(reportId);
+  if (!row) return null;
+  return reportDto({
+    ...row,
+    images: loadImagesForRequests(db, [row.id]).get(row.id) ?? [],
+  });
+}
+
 function loadVerification(db, userId) {
   return db.prepare(`${VERIFICATION_QUERY} WHERE v.userId = ?`).get(userId);
 }
@@ -215,6 +319,91 @@ export function createAdminRouter(db) {
 
   router.post('/verifications/:userId/approve', reviewVerification('approved'));
   router.post('/verifications/:userId/reject', reviewVerification('rejected'));
+
+  router.get('/reports', (req, res, next) => {
+    try {
+      const values = [];
+      let statusFilter = '';
+      if (req.query.status !== undefined) {
+        if (!REPORT_STATUSES.includes(req.query.status)) {
+          throw clientError(400, 'Invalid report status');
+        }
+        statusFilter = ' AND report.status = ?';
+        values.push(req.query.status);
+      }
+      const rows = db
+        .prepare(`${ADMIN_REPORT_QUERY}${statusFilter} ORDER BY report.createdAt DESC, report.id DESC`)
+        .all(...values);
+      const imagesByRequestId = loadImagesForRequests(
+        db,
+        rows.map((row) => row.id),
+      );
+      return res.json({
+        reports: rows.map((row) => reportDto({
+          ...row,
+          images: imagesByRequestId.get(row.id) ?? [],
+        })),
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  function handleRequestReport(action) {
+    return (req, res, next) => {
+      try {
+        const reportId = positiveId(req.params.id);
+        const resultNote = requiredText(req.body?.resultNote, 'resultNote');
+        const report = loadRequestReportWithImages(db, reportId);
+        if (!report) {
+          return res.status(404).json({ error: 'Request report not found' });
+        }
+
+        if (action === 'dismiss') {
+          const update = db.prepare(
+            `UPDATE reports
+             SET status = 'dismissed', handlerId = ?, handledAt = CURRENT_TIMESTAMP,
+                 resultNote = ?
+             WHERE id = ? AND targetType = 'request' AND status = 'pending'`,
+          ).run(req.user.id, resultNote, reportId);
+          if (update.changes === 0) {
+            return res.status(409).json({ error: 'Report cannot be handled in its current state' });
+          }
+          return res.json({ report: loadRequestReportWithImages(db, reportId) });
+        }
+
+        db.transaction(() => {
+          const requestUpdate = db.prepare(
+            `UPDATE requests
+             SET status = 'taken_down', takedownReason = ?, updatedAt = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'approved'`,
+          ).run(resultNote, report.targetId);
+          if (requestUpdate.changes === 0) {
+            throw clientError(409, 'Request cannot be taken down in its current state');
+          }
+          const reportUpdate = db.prepare(
+            `UPDATE reports
+             SET status = 'resolved', handlerId = ?, handledAt = CURRENT_TIMESTAMP,
+                 resultNote = ?
+             WHERE id = ? AND targetType = 'request' AND status = 'pending'`,
+          ).run(req.user.id, resultNote, reportId);
+          if (reportUpdate.changes === 0) {
+            throw clientError(409, 'Report cannot be handled in its current state');
+          }
+        })();
+
+        return res.json({
+          report: loadRequestReportWithImages(db, reportId),
+          request: reviewedRequestDto(loadReviewedRequestWithImages(db, report.targetId)),
+        });
+      } catch (error) {
+        return next(error);
+      }
+    };
+  }
+
+  router.post('/reports/:id/dismiss', handleRequestReport('dismiss'));
+  router.post('/reports/:id/takedown', handleRequestReport('takedown'));
 
   router.get('/requests', (req, res, next) => {
     try {
@@ -289,19 +478,7 @@ export function createAdminRouter(db) {
         }
         values.push(id, fromStatus);
         const approvalCondition =
-          toStatus === 'approved'
-            ? `AND datetime(expiresAt) > datetime('now')
-               AND EXISTS (
-                 SELECT 1 FROM users owner
-                 WHERE owner.id = requests.ownerId
-                   AND owner.status = 'active'
-               )
-               AND EXISTS (
-                 SELECT 1 FROM verifications ownerVerification
-                 WHERE ownerVerification.userId = requests.ownerId
-                   AND ownerVerification.status = 'approved'
-               )`
-            : '';
+          toStatus === 'approved' ? pendingApprovalCondition() : '';
         const update = db
           .prepare(
             `UPDATE requests SET ${assignments.join(', ')}
@@ -322,6 +499,65 @@ export function createAdminRouter(db) {
       }
     };
   }
+
+  router.post('/requests/batch-review', (req, res, next) => {
+    try {
+      const { requestIds, decision, reason } = parseBatchReview(req.body);
+      const result = {
+        approvedCount: 0,
+        rejectedCount: 0,
+        skipped: [],
+        failed: [],
+      };
+      const findStatus = db.prepare('SELECT status FROM requests WHERE id = ?');
+      const update =
+        decision === 'approve'
+          ? db.prepare(
+            `UPDATE requests SET status = 'approved', updatedAt = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'pending'
+             ${pendingApprovalCondition()}`,
+          )
+          : db.prepare(
+            `UPDATE requests
+             SET status = 'rejected', rejectReason = ?, updatedAt = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'pending'`,
+          );
+
+      for (const id of requestIds) {
+        try {
+          const existing = findStatus.get(id);
+          if (!existing || existing.status !== 'pending') {
+            result.skipped.push({ id, reason: 'Request is not pending' });
+            continue;
+          }
+
+          const changes = decision === 'approve'
+            ? update.run(id).changes
+            : update.run(reason, id).changes;
+          if (changes > 0) {
+            if (decision === 'approve') result.approvedCount += 1;
+            else result.rejectedCount += 1;
+            continue;
+          }
+
+          const current = findStatus.get(id);
+          if (!current || current.status !== 'pending') {
+            result.skipped.push({ id, reason: 'Request is not pending' });
+          } else if (decision === 'approve') {
+            result.skipped.push({ id, reason: 'Request cannot be approved' });
+          } else {
+            result.failed.push({ id, reason: 'Request could not be rejected' });
+          }
+        } catch {
+          result.failed.push({ id, reason: 'Request could not be reviewed' });
+        }
+      }
+
+      return res.json(result);
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   router.post(
     '/requests/:id/approve',

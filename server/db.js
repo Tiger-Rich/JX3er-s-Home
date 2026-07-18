@@ -340,6 +340,45 @@ export function seedDatabase(db) {
         industry,
         budgetOrReward,
         expiresAt,
+        status
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM requests WHERE ownerId = ? AND title = ?
+      )
+    `).run(
+      qixiuId,
+      'other',
+      'E2E 批量审核种子委托',
+      '用于验证管理员批量审核的本地种子数据。',
+      JSON.stringify({
+        requestKind: 'E2E 批量审核',
+        helpWanted: '验证管理员可同时审核多条待审委托。',
+        reward: '一杯咖啡或等值感谢',
+        note: 'E2E batch review request',
+      }),
+      '杭州',
+      1,
+      '游戏互联网',
+      '一杯咖啡或等值感谢',
+      '2027-06-30 23:59:59',
+      'pending',
+      qixiuId,
+      'E2E 批量审核种子委托',
+    );
+
+    db.prepare(`
+      INSERT INTO requests (
+        ownerId,
+        type,
+        title,
+        description,
+        details,
+        city,
+        remote,
+        industry,
+        budgetOrReward,
+        expiresAt,
         status,
         rejectReason
       )

@@ -916,7 +916,7 @@ textarea[readonly] {
 
 .admin-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -979,6 +979,10 @@ table {
   min-width: 1120px;
 }
 
+.admin-table-reports {
+  min-width: 1120px;
+}
+
 .admin-table-users {
   min-width: 1040px;
 }
@@ -1010,6 +1014,76 @@ tbody tr:last-child td {
   font-size: 0.88rem;
 }
 
+.admin-selection-cell {
+  width: 44px;
+  padding-right: 4px;
+  text-align: center;
+}
+
+.admin-selection-cell input {
+  width: 18px;
+  height: 18px;
+}
+
+.admin-batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(239, 226, 210, 0.4);
+}
+
+.admin-batch-toolbar p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.admin-batch-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-report-status-filter {
+  min-width: 160px;
+}
+
+.admin-confirmation {
+  position: fixed;
+  z-index: 20;
+  right: 24px;
+  bottom: 24px;
+  width: min(440px, calc(100vw - 32px));
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  box-shadow: 0 20px 48px rgba(80, 56, 37, 0.22);
+}
+
+.admin-confirmation h3,
+.admin-confirmation p {
+  margin: 0;
+}
+
+.admin-confirmation > div:first-child {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1029,6 +1103,10 @@ tbody tr:last-child td {
 
   .admin-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-batch-toolbar {
+    align-items: stretch;
   }
 
   .action-row,

@@ -17,6 +17,7 @@ import MyRequestsPage from '../src/pages/MyRequestsPage.jsx';
 import ProfilePage from '../src/pages/ProfilePage.jsx';
 import RequestDetailPage from '../src/pages/RequestDetailPage.jsx';
 import AdminDashboard from '../src/pages/admin/AdminDashboard.jsx';
+import AdminReports from '../src/pages/admin/AdminReports.jsx';
 import AdminRequests from '../src/pages/admin/AdminRequests.jsx';
 import AdminUsers from '../src/pages/admin/AdminUsers.jsx';
 import AdminVerifications from '../src/pages/admin/AdminVerifications.jsx';
@@ -2182,6 +2183,21 @@ describe('admin review pages', () => {
       verificationStatus: 'approved',
     },
   };
+  const pendingReport = {
+    id: 61,
+    reporterId: 8,
+    targetType: 'request',
+    targetId: 41,
+    reason: '内容疑似虚假，需要掌柜核查。',
+    status: 'pending',
+    handlerId: null,
+    handledAt: null,
+    resultNote: null,
+    createdAt: '2026-07-18T12:00:00.000Z',
+    reporter: { id: 8, nickname: '万花同门' },
+    handler: null,
+    request: reviewedRequest,
+  };
   const adminUsers = [
     {
       id: 1, nickname: '掌柜', city: '杭州', role: 'admin', status: 'active',
@@ -2284,6 +2300,71 @@ describe('admin review pages', () => {
     expect(screen.getByRole('button', { name: '拒绝委托' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '下架委托' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '通过委托' })).toBeEnabled();
+  });
+
+  it('requires a report result before confirming an admin takedown', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ reports: [pendingReport] }))
+      .mockResolvedValueOnce(jsonResponse({
+        report: { ...pendingReport, status: 'resolved', resultNote: '存在风险，已下架。' },
+        request: { ...reviewedRequest, status: 'taken_down', takedownReason: '存在风险，已下架。' },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ reports: [] }))
+      .mockResolvedValueOnce(jsonResponse({ reports: [] }));
+    const user = userEvent.setup();
+    render(<AdminReports />);
+
+    await screen.findByRole('table', { name: '举报处理列表' });
+    expect(screen.getByRole('button', { name: '下架委托并完成处理' })).toBeDisabled();
+    await user.type(screen.getByLabelText('举报 61 处理说明'), '存在风险，已下架。');
+    await user.click(screen.getByRole('button', { name: '下架委托并完成处理' }));
+    expect(screen.getByRole('dialog', { name: '确认处理举报' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '确认下架并处理' }));
+
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/reports/61/takedown', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ resultNote: '存在风险，已下架。' }),
+    }));
+    expect(await screen.findByRole('status')).toHaveTextContent('举报处理已更新。');
+  });
+
+  it('batch approves selected pending requests and clears selection after refresh', async () => {
+    const secondPending = { ...reviewedRequest, id: 42, title: '第二条待审委托' };
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        requests: [reviewedRequest, secondPending, { ...reviewedRequest, id: 43, status: 'approved' }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ approvedCount: 2, rejectedCount: 0, skipped: [], failed: [] }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }))
+      .mockResolvedValueOnce(jsonResponse({ requests: [] }));
+    const user = userEvent.setup();
+    render(<AdminRequests />);
+
+    await user.click(await screen.findByRole('checkbox', { name: '选择委托 41' }));
+    await user.click(screen.getByRole('checkbox', { name: '选择委托 42' }));
+    expect(screen.queryByRole('checkbox', { name: '选择委托 43' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '批量通过 2 条' }));
+    expect(screen.getByRole('dialog', { name: '确认批量审核' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '确认批量通过' }));
+
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/requests/batch-review', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ requestIds: [41, 42], decision: 'approve' }),
+    }));
+    expect(await screen.findByRole('status')).toHaveTextContent('批量审核完成：通过 2 条，拒绝 0 条，跳过 0 条。');
+    expect(screen.queryByRole('checkbox', { name: '选择委托 41' })).not.toBeInTheDocument();
+  });
+
+  it('requires a shared reason before confirming a batch rejection', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ requests: [reviewedRequest] }));
+    const user = userEvent.setup();
+    render(<AdminRequests />);
+
+    await user.click(await screen.findByRole('checkbox', { name: '选择委托 41' }));
+    await user.click(screen.getByRole('button', { name: '批量拒绝 1 条' }));
+    expect(screen.getByRole('button', { name: '确认批量拒绝' })).toBeDisabled();
+    await user.type(screen.getByLabelText('批量拒绝理由'), '不符合发布范围');
+    expect(screen.getByRole('button', { name: '确认批量拒绝' })).toBeEnabled();
   });
 
   it('shows withdrawn and closed request statuses in the admin filter and list', async () => {
@@ -2457,6 +2538,7 @@ describe('admin review pages', () => {
     fetch.mockImplementation((path) => {
       if (path.startsWith('/api/admin/verifications')) return Promise.resolve(jsonResponse({ verifications: [verification] }));
       if (path.startsWith('/api/admin/requests')) return Promise.resolve(jsonResponse({ requests: [reviewedRequest] }));
+      if (path.startsWith('/api/admin/reports')) return Promise.resolve(jsonResponse({ reports: [pendingReport] }));
       if (path.startsWith('/api/admin/users')) return Promise.resolve(jsonResponse({ users: adminUsers }));
       throw new Error(`Unexpected request: ${path}`);
     });
@@ -2466,7 +2548,7 @@ describe('admin review pages', () => {
     expect(await screen.findByText('待审认证 1')).toBeVisible();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/admin/verifications?status=pending', expect.any(Object));
-    for (const tab of ['认证审核', '委托审核', '用户列表']) expect(screen.getByRole('button', { name: tab })).toBeVisible();
+    for (const tab of ['认证审核', '委托审核', '举报处理', '用户列表']) expect(screen.getByRole('button', { name: tab })).toBeVisible();
     expect(screen.queryByRole('button', { name: '待掌柜审核' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '委托审核' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
@@ -2475,6 +2557,8 @@ describe('admin review pages', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     await user.click(screen.getByRole('button', { name: '委托审核' }));
     expect(screen.getByLabelText('委托城市')).toHaveValue('苏州');
+    await user.click(screen.getByRole('button', { name: '举报处理' }));
+    expect(await screen.findByText('待处理举报 1')).toBeVisible();
   });
 
   it('refreshes the pending request summary after a mutation even when a filter is active', async () => {
